@@ -42,7 +42,7 @@ pip install pygame
 Just run the script using:
 
 ```bash
-python game_of_life_with_genetics.py
+python JMRsGameOfLifewith4Genes.py
 ```
 
 - Click to place or remove cells.
