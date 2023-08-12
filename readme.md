@@ -1,6 +1,63 @@
 # Code for the 3D Neuron Game of Life Simulator and Scripts to Chat with LLMs locally
+# JMRs3D_NeuroSimGameofLife_Jul_12.py (3D version)
 
-# JMR's Game of Life with Genetics
+This Python application, called JMR's Genetic Game of Neural Network LIFE, is a unique combination of the classic [Conway's Game of Life ↗](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) and a Neural Network. The game simulates a universe filled with cells that follow certain rules for survival, reproduction, and death, and uses a Neural Network for learning and training. The Neural Network learns from the patterns formed by the cells and adjusts itself to better predict future cell generations.
+
+The application is written in Python and uses the Pygame library for visualizing the grid of cells, and NumPy for handling the multi-dimensional arrays that hold the cell data.
+
+## Installation
+
+You will need Python 3.6 or later to run this application.
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/your_username/JMRs3D_NeuroSimGameofLife_Jul_12.py.git
+```
+
+2. Install the required Python packages:
+
+```bash
+pip install pygame numpy
+```
+
+## Running the Application
+
+To run the application, navigate to the directory where you cloned the repository and run:
+
+```bash
+python JMRs3D_NeuroSimGameofLife_Jul_12.py
+```
+
+## How to Play
+
+The application window displays a grid of cells, where each cell represents a neuron in the Neural Network. The cells are color-coded according to various properties, such as their survival thresholds, birth thresholds, mutation rates, and more.
+
+You can interact with the simulation using the following keys:
+
+- **Space**: Start and pause the simulation
+- **Q**: Quit the simulation
+- **S**: Save the current state of layers 0 and 15
+- **L**: Load the saved state of layers 0 and 15
+- **O**: Output the current state of all layers
+- **I**: Input a previously saved state of all layers
+- **N**: Load the training data
+- **F**: Toggle forward_propagation
+- **R**: Toggle reverse forward_propagation
+- **B**: Toggle back_propagation
+- **T**: Toggle training mode
+- **G**: Toggle gene display
+- **W**: Toggle weight display
+
+## Application Logic
+
+The application logic is based on a combination of Conway's Game of Life and a Neural Network:
+
+- **Conway's Game of Life**: Each cell in the grid follows the rules of Conway's Game of Life, with some modifications. The cell's state (alive or dead) is determined by the number of its alive neighbors and its own genes. The genes decide the cell's tolerance for overcrowding and isolation, its birth threshold, and its mutation rate.
+
+- **Neural Network**: Each cell represents a neuron in a Neural Network, and is connected to the neighboring cells by dendrites with weights. The Neural Network adjusts these weights to learn from the patterns formed by the cells over time.
+
+# JMRsGameOfLifewith4Genes.py
 
 JMR's Game of Life is a unique twist on Conway's Game of Life with the addition of genetic mutations and more flexible rules. Each cell possesses genes that dictate its behavior and how it interacts with neighboring cells. These genes can mutate, leading to diverse behaviors in the simulation.
 
