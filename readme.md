@@ -1,4 +1,5 @@
 # Code for the 3D Neuron Game of Life Simulator and Scripts to Chat with LLMs locally
+![banner image](https://github.com/jmrothberg/3D-neuron-game-of-life-simulator/blob/main/Conway's%20Game%20of%20Life%20meets%20Genetics.png)
 # JMRs3D_NeuroSimGameofLife_Jul_12.py (3D version)
 
 This Python application, called JMR's Genetic Game of Neural Network LIFE, is a unique combination of the classic [Conway's Game of Life ↗](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) and a Neural Network. The game simulates a universe filled with cells that follow certain rules for survival, reproduction, and death, and uses a Neural Network for learning and training. The Neural Network learns from the patterns formed by the cells and adjusts itself to better predict future cell generations.
