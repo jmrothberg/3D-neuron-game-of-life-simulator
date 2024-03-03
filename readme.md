@@ -58,7 +58,7 @@ The application logic is based on a combination of Conway's Game of Life and a N
 
 - **Neural Network**: Each cell represents a neuron in a Neural Network, and is connected to the neighboring cells by dendrites with weights. The Neural Network adjusts these weights to learn from the patterns formed by the cells over time.
 
-# JMRsGameOfLifewith4Genes.py
+# JMR3D_NeuroSim_Oct_24.py
 
 JMR's Game of Life is a unique twist on Conway's Game of Life with the addition of genetic mutations and more flexible rules. Each cell possesses genes that dictate its behavior and how it interacts with neighboring cells. These genes can mutate, leading to diverse behaviors in the simulation.
 
@@ -100,7 +100,7 @@ pip install pygame
 Just run the script using:
 
 ```bash
-python JMRsGameOfLifewith4Genes.py
+python JMR3D_NeuroSim_Oct_24.py
 ```
 
 - Click to place or remove cells.
