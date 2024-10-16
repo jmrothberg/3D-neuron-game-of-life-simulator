@@ -1,4 +1,6 @@
-# Code for the 3D Neuron Game of Life Simulator and Scripts to Chat with LLMs locally
+# Code for the 3D Neuron Game of Life Simulator and Scripts to Chat with LLMs locally - NOW WITH 3D VIEWER OF CELLS and connections
+
+Love viewer
 ![banner image](https://github.com/jmrothberg/3D-neuron-game-of-life-simulator/blob/main/Conway's%20Game%20of%20Life%20meets%20Genetics.png)
 # JMRs3D_NeuroSimGameofLife_Jul_12.py (3D version)
 
