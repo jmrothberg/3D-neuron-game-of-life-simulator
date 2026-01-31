@@ -1,0 +1,22 @@
+timestamp: 02-20-01-47
+Cell Settings:
+mutation_rate: 10
+lower_allele_range: 2
+upper_allele_range: 15
+Simulation Settings:
+NUM_LAYERS: 8
+LENGTH_OF_DENDRITE: 3
+Bias_Range: 0.01
+Weight Range based on estimate Avg weights/cell: 5
+Weight decay: 1e-06
+Charge change for prunning and charge protection (delta): 0.001
+learning_rate: 0.01
+how_much_training_data: 20
+start_index: 0
+training_cycles: 17
+Bingo count: 20
+max_bingo_count: 20
+Loss: 0.0
+Number of cells: 0
+Number of weights: 7241.850696444904
+Weight/Cell: 724185069644.49

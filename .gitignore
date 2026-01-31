@@ -1,0 +1,96 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Large data files (explain in README how to obtain)
+# Uncomment these if you don't want to track data files:
+# CIFAR_10/
+# MNIST_*
+# Fashion_MNIST_*
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.env.local
+*.env
+
+# Video recordings (large files)
+*.mov
+*.mp4
+*.avi
+
+# Backup files
+*.bak
+*.backup
+
+# IDE/Editor artifacts with unusual names
+title="*
+
+# Large media directories (keep .gitignore but exclude contents for GitHub)
+# Uncomment if you want to exclude these from git:
+# June 2023 screen shots/
+# neuro life sim movies and images/

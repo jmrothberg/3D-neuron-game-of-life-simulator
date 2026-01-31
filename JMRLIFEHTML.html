@@ -1,0 +1,143 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JMR's Game of Life with Genetics</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="1200" height="1200"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const CELL_SIZE = 14;
+        const WIDTH = canvas.width / CELL_SIZE;
+        const HEIGHT = canvas.height / CELL_SIZE;
+        const FPS = 10;
+        const COLORS = [
+            { r: 255, g: 0, b: 0 },
+            { r: 0, g: 255, b: 0 },
+            { r: 0, g: 0, b: 255 },
+            { r: 255, g: 255, b: 0 }
+        ];
+
+        let germ_mut_rate = 10000;
+        let som_mut_rate = 1000;
+        let lower_allele_range = 2;
+        let upper_allele_range = 3;
+
+        class Cell {
+            constructor(genes = null) {
+                if (genes === null) {
+                    this.genes = Array.from({ length: 4 }, () => randomInt(lower_allele_range, upper_allele_range));
+                } else {
+                    this.genes = genes;
+                }
+                this.colors = this.genes.map((gene, index) => {
+                    const color = COLORS[index];
+                    return {
+                        r: Math.floor(gene * color.r / 8),
+                        g: Math.floor(gene * color.g / 8),
+                        b: Math.floor(gene * color.b / 8)
+                    };
+                });
+            }
+        }
+
+        function randomInt(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+
+        function drawGrid() {
+            ctx.strokeStyle = 'black';
+            for (let x = 0; x < canvas.width; x += CELL_SIZE) {
+                for (let y = 0; y < canvas.height; y += CELL_SIZE) {
+                    ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+                }
+            }
+        }
+
+        function drawCells() {
+            for (let x = 0; x < WIDTH; x++) {
+                for (let y = 0; y < HEIGHT; y++) {
+                    const cell = cells[x][y];
+                    if (cell !== null) {
+                        cell.colors.forEach((color, index) => {
+                            ctx.fillStyle = `rgb(${color.r}, ${color.g}, ${color.b})`;
+                            ctx.fillRect(
+                                x * CELL_SIZE + (index % 2) * (CELL_SIZE / 2),
+                                y * CELL_SIZE + Math.floor(index / 2) * (CELL_SIZE / 2),
+                                CELL_SIZE / 2,
+                                CELL_SIZE / 2
+                            );
+                        });
+                    } else {
+                        ctx.fillStyle = 'white';
+                        ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+        }
+
+        function updateCells() {
+            const newCells = JSON.parse(JSON.stringify(cells));
+            for (let x = 0; x < WIDTH; x++) {
+                for (let y = 0; y < HEIGHT; y++) {
+                    const neighbors = [];
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            if (dx !== 0 || dy !== 0) {
+                                const nx = (x + dx + WIDTH) % WIDTH;
+                                const ny = (y + dy + HEIGHT) % HEIGHT;
+                                if (cells[nx][ny] !== null) {
+                                    neighbors.push(cells[nx][ny]);
+                                }
+                            }
+                        }
+                    }
+                    const numAlive = neighbors.length;
+                    if (cells[x][y] !== null) {
+                        cells[x][y].genes = cells[x][y].genes.map((gene, index) => {
+                            return randomInt(1, som_mut_rate) > cells[x][y].genes[3] ? gene : randomInt(lower_allele_range, upper_allele_range);
+                        });
+                        if (numAlive <= cells[x][y].genes[1] || numAlive >= cells[x][y].genes[0]) {
+                            newCells[x][y] = null;
+                        }
+                    } else if (cells[x][y] === null && neighbors.length > 0) {
+                        const potentialParents = neighbors;
+                        if (potentialParents.length >= 2) {
+                            const parent1 = potentialParents[randomInt(0, potentialParents.length - 1)];
+                            const parent2 = potentialParents[randomInt(0, potentialParents.length - 1)];
+                            const newGenes = parent1.genes.map((gene, index) => {
+                                return randomInt(1, 100) > newGenes[3] ? gene : randomInt(lower_allele_range, upper_allele_range);
+                            });
+                            if (numAlive === newGenes[2]) {
+                                newCells[x][y] = new Cell(newGenes);
+                            }
+                        } else if (potentialParents.length > 0) {
+                            const parent1 = potentialParents[randomInt(0, potentialParents.length - 1)];
+                            const newGenes = parent1.genes.map((gene, index) => {
+                                return randomInt(1, germ_mut_rate) > newGenes[3] ? gene : randomInt(lower_allele_range, upper_allele_range);
+                            });
+                            if (numAlive === newGenes[2]) {
+                                newCells[x][y] = new Cell(newGenes);
+                            }
+                        }
+                    }
+                }
+            }
+            cells = newCells;
+        }
+
+        let cells = Array.from({ length: WIDTH }, () => Array.from({ length: HEIGHT }, () => null));
+        let running = false;
+        let mouseUp = true;
+
+        canvas.addEventListener('mousedown', (event) => {
+            const x = Math.floor

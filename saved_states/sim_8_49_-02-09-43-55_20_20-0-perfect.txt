@@ -1,0 +1,22 @@
+timestamp: 02-09-43-55
+Cell Settings:
+germ_mut_rate: 1000
+som_mut_rate: 1000
+lower_allele_range: 2
+upper_allele_range: 15
+Simulation Settings:
+NUM_LAYERS: 8
+LENGTH_OF_AXON: 3
+Bias_Range: 0.01
+Weight Range based on estimate Avg weights/cell: 5
+Charge change for prunning and charge protection (delta): 0.01
+learning_rate: 0.001
+how_much_training_data: 20
+start_index: 0
+training_cycles: 19
+Bingo count: 20
+max_bingo_count: 20
+Loss: 0.0005029041703586719
+Number of cells: 457
+Number of weights: 12938.0
+Weight/Cell: 28.31
