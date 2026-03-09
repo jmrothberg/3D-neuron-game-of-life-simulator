@@ -68,7 +68,7 @@ def _layer_color(layer, num_layers, charge):
     """Color a neuron by its layer position and charge magnitude.
 
     Hue ramp: blue (input) → cyan → green (mid hidden) → yellow → red (output).
-    Brightness scales with |charge|.
+    Brightness scales with |charge|, with a visible minimum floor.
     """
     if num_layers <= 1:
         t = 0.5
@@ -77,7 +77,8 @@ def _layer_color(layer, num_layers, charge):
     # Hue: 0.6 (blue) → 0.0 (red)
     h = 0.6 * (1.0 - t)
     s = 0.85
-    v = 0.3 + 0.7 * min(abs(charge), 1.0)
+    # Minimum brightness 0.5 so even zero-charge cells are clearly visible
+    v = 0.5 + 0.5 * min(abs(charge), 1.0)
     return _hsv_to_rgb(h, s, v)
 
 
@@ -481,22 +482,22 @@ def render_3d_network(state, config):
         glVertexPointer(3, GL_FLOAT, 0, _neuron_verts)
         glColorPointer(3, GL_FLOAT, 0, _neuron_colors)
 
-        # Draw input neurons (small points)
+        # Draw input neurons
         start, count = _input_range
         if count > 0:
-            glPointSize(4)
+            glPointSize(6)
             glDrawArrays(GL_POINTS, start, count)
 
-        # Draw hidden neurons (medium points)
+        # Draw hidden neurons
         start, count = _hidden_range
         if count > 0:
             glPointSize(8)
             glDrawArrays(GL_POINTS, start, count)
 
-        # Draw output neurons (large points)
+        # Draw output neurons (largest)
         start, count = _output_range
         if count > 0:
-            glPointSize(12)
+            glPointSize(14)
             glDrawArrays(GL_POINTS, start, count)
 
         glDisableClientState(GL_VERTEX_ARRAY)
