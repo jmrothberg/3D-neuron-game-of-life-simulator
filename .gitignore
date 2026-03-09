@@ -41,6 +41,9 @@ wheels/
 .pydevproject
 .settings/
 
+# Claude Code
+.claude/
+
 # macOS
 .DS_Store
 .AppleDouble

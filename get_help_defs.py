@@ -55,14 +55,6 @@ def get_defs():
     change to any value between 0 and 7 
     (or whatever range is selected by the 
     user).
-
-    Skip Offset (SO): This gene (gene[9]) 
-    determines the number of layers above 
-    from which a cell receives its connections.
-    For example, if Skip Offset = 1, the cell 
-    connects to the immediate previous layer;
-    if Skip Offset = 2, then it connects to the 
-    cell two layers above.
     """
 
     jmr_defs2 = """
@@ -101,7 +93,6 @@ def get_defs():
     Bias Gene (BI)             : .genes[5]
     Error Gene (ER)            : .genes[6]
     Charge Gene (CG)           : .genes[7]
-    Skip Offset:                 .genes[9]
     """
 
     conways_defs = """
@@ -259,46 +250,20 @@ def get_defs():
     cells in the layer below.
     """
 
-    backprop_view = """
-    3D Backprop View shows network learning:
-
-    Normal Mode (K off):
-    - Cells: Cyan = positive charge
-            Magenta = negative charge
-            Brightness shows strength
-    - Lines: Color mix shows weights and 
-            error values
-    
-    Weight Change Mode (K on):
-    - Cells: Purple = error magnitude
-            Orange = gradient magnitude 
-            Blue = background cells
-    - Lines: Green = positive weights
-            Red = negative weights
-
-    Controls in 3D View:
-    Mouse drag - Rotate view
-    Mouse wheel - Zoom in/out
-    ESC - Exit 3D view
-    K - Toggle display mode
-    """
-
     controls = """
     Mouse Down/Mouse Drag - Places a Cell
     Mouse Over - Get Cell Info & Statistics
-    Right Mouse Button - Display Cell Info
     Close Window - Quit.
-    Space - Toggle Running: {running} 
+    Space - Toggle Running (Andromida & Prune/Protection): {running} 
     while running:
+        U - Toggle Autonomous Network Genes: {autonomous_network_genes}
         A - Andromida_mode to allow normal 
         growth rules: {andromida_mode}  
-        U - Autonomous mode to allow genes to determine specs
-        C - Set Charge AND Gradient Pruning level
-        J - Toggle Charge Pruning
-        O - Toggle Gradient Pruning
-        Protection: {charge_change_protection, delta :.4f}
-        P - Toggle Prune: {prune} 
-        = - Toggle Prune Logic or/and: {prune_logic}
+        C - Change & Gradient Prune & Protection: {charge_change_protection, delta :.4f}
+        
+        P - Toggle Charge Prune: {prune} 
+        = Toggle Prune Logic AND/OR: {prune_logic}
+        O - Toggle Gradient Prune: {gradient_prune}
             
     T - Toggle Training: {training_mode}                                  
         I - Set Learning Rate: {learning_rate :.4f}
@@ -306,24 +271,18 @@ def get_defs():
         Forward Prop: {direction_of_charge_flow}
         B - Toggle Back Prop: {back_prop}                                  
         
-    G - Toggle Gene or Protein Display: 
+    G - Toggle Protein/Gene display: 
     {display}   
-    W - Resets gradient, charge forward, charge reverse, error
-    X - Reset weights and biases to random 
+    X - Reset network genes and proteins, weights, decay and biases cell autonomously or globally 
     values         
-    D - Toggle 2D Display on and off
-    3 - Toggle 3D View & 2D View
-    4 - Backprop View in 3D 0 ESC to exit
-    K - Toggle Weight Change View in 3D
-    ESC - Escape Backprop View in 3D
+    D - Toggle Display updates: {display_updating}
     V - View all settings
     H - Scroll through help screens  
     L - Load layers     
     S - Save layers     
     M - load MNEST training data    
-    E - Enter Global Paramaters for Network
-   
-    Arrow Keys - Scroll Pages in File Selection
+    E - Enter Paramaters  
+    N - Nuke all cells
     """
 
-    return jmr_defs, jmr_defs2, conways_defs, how_network_works, forward_pass, how_backprop_works, how_backprop_works2, controls, backprop_view
+    return jmr_defs, jmr_defs2, conways_defs, how_network_works, forward_pass, how_backprop_works, how_backprop_works2, controls
