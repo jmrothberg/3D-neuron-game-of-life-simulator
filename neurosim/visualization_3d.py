@@ -449,8 +449,8 @@ def render_3d_network(state, config):
         glEnableClientState(GL_VERTEX_ARRAY)
         glEnableClientState(GL_COLOR_ARRAY)
 
-        glVertexPointer(3, GL_FLOAT, 0, _neuron_verts.ctypes)
-        glColorPointer(3, GL_FLOAT, 0, _neuron_colors.ctypes)
+        glVertexPointer(3, GL_FLOAT, 0, _neuron_verts)
+        glColorPointer(3, GL_FLOAT, 0, _neuron_colors)
 
         # Draw input neurons (small points)
         start, count = _input_range
@@ -479,8 +479,8 @@ def render_3d_network(state, config):
         glEnableClientState(GL_COLOR_ARRAY)
         glLineWidth(1)
 
-        glVertexPointer(3, GL_FLOAT, 0, _conn_verts.ctypes)
-        glColorPointer(3, GL_FLOAT, 0, _conn_colors.ctypes)
+        glVertexPointer(3, GL_FLOAT, 0, _conn_verts)
+        glColorPointer(3, GL_FLOAT, 0, _conn_colors)
         glDrawArrays(GL_LINES, 0, len(_conn_verts))
 
         glDisableClientState(GL_VERTEX_ARRAY)
@@ -520,8 +520,8 @@ def render_3d_backprop(state, config, current_layer, current_pos):
         dimmed_colors = _neuron_colors * 0.4
         glEnableClientState(GL_VERTEX_ARRAY)
         glEnableClientState(GL_COLOR_ARRAY)
-        glVertexPointer(3, GL_FLOAT, 0, _neuron_verts.ctypes)
-        glColorPointer(3, GL_FLOAT, 0, dimmed_colors.ctypes)
+        glVertexPointer(3, GL_FLOAT, 0, _neuron_verts)
+        glColorPointer(3, GL_FLOAT, 0, dimmed_colors)
         glPointSize(5)
         glDrawArrays(GL_POINTS, 0, len(_neuron_verts))
         glDisableClientState(GL_VERTEX_ARRAY)
@@ -532,8 +532,8 @@ def render_3d_backprop(state, config, current_layer, current_pos):
         glEnableClientState(GL_VERTEX_ARRAY)
         glEnableClientState(GL_COLOR_ARRAY)
         glLineWidth(1)
-        glVertexPointer(3, GL_FLOAT, 0, _conn_verts.ctypes)
-        glColorPointer(3, GL_FLOAT, 0, dimmed_conn.ctypes)
+        glVertexPointer(3, GL_FLOAT, 0, _conn_verts)
+        glColorPointer(3, GL_FLOAT, 0, dimmed_conn)
         glDrawArrays(GL_LINES, 0, len(_conn_verts))
         glDisableClientState(GL_VERTEX_ARRAY)
         glDisableClientState(GL_COLOR_ARRAY)
@@ -647,8 +647,8 @@ def render_3d_network_no_connections(state, config):
     if _neuron_verts is not None and len(_neuron_verts) > 0:
         glEnableClientState(GL_VERTEX_ARRAY)
         glEnableClientState(GL_COLOR_ARRAY)
-        glVertexPointer(3, GL_FLOAT, 0, _neuron_verts.ctypes)
-        glColorPointer(3, GL_FLOAT, 0, _neuron_colors.ctypes)
+        glVertexPointer(3, GL_FLOAT, 0, _neuron_verts)
+        glColorPointer(3, GL_FLOAT, 0, _neuron_colors)
         glPointSize(5)
         glDrawArrays(GL_POINTS, 0, len(_neuron_verts))
         glDisableClientState(GL_VERTEX_ARRAY)
