@@ -119,107 +119,131 @@ def get_defs():
     """
 
     how_network_works = """
-    The weights represent the influence 
-    that a given neuron (in this case, a 
-    cell) in one layer has on the neurons 
-    in the subsequent layer. By adjusting 
-    these weights, we allow the network to 
-    learn over time. Loaded data 
-    introduced into layer 0.
+    HOW THE NETWORK IS DIFFERENT
 
-    During Training, adjustments made to 
-    weights throughout the network, based 
-    on error signals determined by the 
-    difference between the actual outputs 
-    in layer 14 and the desired outputs in 
-    layer 15 (This is NUM_LAYERS-2 and 
-    NUM_LAYERS-1) and so on for each 
-    subsequence layer. The training 
-    process involves adjusting weights to 
-    minimize the error between the 
-    network's output and this desired 
-    output.
+    In a traditional NN, weights live in
+    layer-to-layer matrices owned by the
+    network. Here, weights live INSIDE
+    each cell's dendrites -- a flat 1D
+    array (self.weights) that the cell
+    owns, carries, and updates itself.
 
-    This is a form of supervised learning, 
-    where the network is guided towards 
-    the correct output by feedback 
-    provided in the form of a desired 
-    output.
+    The Grid:
+    Layer 0    Layer 1..N-2   Layer N-1
+    (Input)    (Hidden)       (Desired)
+    MNIST  --> cells learn --> labels
+    pixels     & evolve       (0-9)
+
+    Training data loaded into layer 0.
+    Desired outputs loaded into layer N-1.
+    Cells in layers 1 to N-2 learn to
+    map inputs to outputs by adjusting
+    their own weights via backprop.
+
+    Each cell has its own learning rate
+    (gene 9), weight decay (gene 8), and
+    activation curve (gene 11). No global
+    optimizer -- each cell runs its own
+    gradient descent.
     """
 
     forward_pass = """
-    Forward pass moves input data through
-    the network layer by layer. Each cell
-    computes:
-      charge = leaky_ReLU(bias +
-        sum(upstream_charge * weight))
+    FORWARD PASS (one cell's view)
 
-    Layer N-2:       Layer N-1:       Layer N:
+    Cell X looks at the layer ABOVE it
+    and gathers charges from neighbors
+    within its dendrite reach:
 
-    B11 B12 B13      C11 C12 C13      W11 W12 W13
-    B21 B22 B23  --> C21 C22 C23  --> W21 W22 W23
-    B31 B32 B33      C31 C32 C33      W31 W32 W33
+    Layer above:        This cell:
+     [A][B][C]
+     [D][E][F] ---->    Cell X
+     [G][H][I]          at (x,y)
+     3x3 reach
+     (gene 4 = 9)
 
-    1. Each cell gathers charges from
-    upstream cells within its dendrite
-    reach (gene 4 controls reach size).
+    Step 1: Gather upstream charges
+      (skip empty positions)
 
-    2. The cell computes a weighted sum
-    of upstream charges using its own
-    weights, adds its bias, then applies
-    leaky ReLU activation (gene 11
-    controls the negative slope).
+    Step 2: Weighted sum + bias
+      charge = bias
+            + A.charge * w[0]
+            + B.charge * w[1]
+            + ... + I.charge * w[8]
 
-    3. The resulting charge is clipped
-    to [-10, 10] and stored as the
-    cell's new charge value.
+    Step 3: Leaky ReLU activation
+      if charge > 0: keep it
+      if charge < 0: charge *= slope
+        (gene 11 controls slope)
+
+    Step 4: Clip to [-10, 10], store
+
+    Weight index formula:
+      idx = (dx+reach)*matrix + (dy+reach)
+      (-1,-1)->0  (-1,0)->1  (-1,+1)->2
+      ( 0,-1)->3  ( 0,0)->4  ( 0,+1)->5
+      (+1,-1)->6  (+1,0)->7  (+1,+1)->8
     """
 
     how_backprop_works = """
-    The weights of the current cell are
-    updated based on the error of the
-    current cell and the charge of the
-    cells in the layer above.
+    BACKWARD PASS: 2 JOBS PER CELL
 
-    `get_upper_layer_cells` gathers the
-    upstream cells within dendrite reach.
-    These are passed to
-    `update_weights_and_bias` to compute
-    gradient = error * upstream_charge
-    and update each weight:
-      w -= lr * gradient + decay * w
+    Job 1: COMPUTE ERROR SIGNAL
+    Output layer (N-2):
+      error = (my_charge - desired)
+              * ReLU_derivative(charge)
 
-    `get_layer_below_cells` gathers the
-    downstream cells. These are passed to
-    `compute_error_signal` to propagate
-    error backward through the reversed
-    weight index."""
+    Hidden layers:
+      Look at cells BELOW (layer+1).
+      They already have their errors.
+      error = SUM(cell_below.error
+        * cell_below.weights[rev_idx])
+        * ReLU_derivative(my_charge)
+
+    Job 2: UPDATE MY WEIGHTS
+    Look at cells ABOVE (layer-1).
+    For each upstream cell:
+      gradient = my_error * upstream.charge
+      w[idx] -= lr * gradient + decay * w
+      bias   -= lr * my_error
+
+    lr = gene 9, decay = gene 8
+    (per-cell in autonomous mode)
+    """
 
     how_backprop_works2 = """
-    Backprop figure:
-    Layer N-1 (Above) Layer N (Current) Layer N+1 (Below)
+    WHY reversed_index WORKS
 
-    Cell A          Cell X                 Cell 1
-    Cell B          Cell Y                 Cell 2
-    Cell C          Cell Z                 Cell 3
+    Forward: Cell 5 (below) looks UP
+    at Cell X through weight_index:
+      idx = (dx+reach)*m + (dy+reach)
 
-    Cells A, B, C are in the layer above.
-    Cells X, Y, Z are in the current layer.
-    Cells 1, 2, 3 are in the layer below.
+    Backward: Cell X looks DOWN at
+    Cell 5 through reversed_index:
+      rev = len(w) - 1 - idx
 
-    WEIGHT UPDATE (update_weights_and_bias):
-    For Cell X, we use charges of A, B, C
-    (layer above) and the error of Cell X.
-    weight_index = (dx+reach)*matrix+(dy+reach)
+    For 3x3 weights:
+      fwd 0 <-> rev 8  (-1,-1)<->(+1,+1)
+      fwd 1 <-> rev 7  (-1, 0)<->(+1, 0)
+      fwd 4 <-> rev 4  ( 0, 0)<->( 0, 0)
+      fwd 8 <-> rev 0  (+1,+1)<->(-1,-1)
 
-    ERROR SIGNAL (compute_error_signal):
-    For Cell X, we use errors and weights
-    of Cells 1, 2, 3 (layer below) and
-    the leaky ReLU derivative of Cell X.
-    reversed_index = len(weights)-1-weight_index
-    This maps (dx,dy) to (-dx,-dy), which
-    is equivalent to transposing the weight
-    matrix in standard backprop.
+    This maps (dx,dy) to (-dx,-dy).
+    Same as transposing the weight
+    matrix -- exactly what standard
+    backprop does, but computed from
+    the flat 1D array stored in each
+    cell's dendrites.
+
+    FULL PICTURE:
+    Layer above    This cell    Layer below
+     [A][B][C]                   [1][2][3]
+     [D][E][F]      Cell X       [4][5][6]
+     [G][H][I]     error=?       [7][8][9]
+        |                            |
+        v                            v
+    update X's      compute X's error
+    weights using   from below cells'
+    A-I charges     errors + weights
     """
 
     controls = """
