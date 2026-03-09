@@ -37,9 +37,9 @@ Genes 0–2 control **survival and reproduction** (Game of Life rules). Genes 3�
 | **0** | Overcrowding Tolerance (OT) | Max alive neighbors before cell dies | 2–15 | Apoptosis from contact inhibition |
 | **1** | Isolation Tolerance (IT) | Min alive neighbors before cell dies | 2–15 (≤ gene 0) | Death from lack of trophic factors |
 | **2** | Birth Threshold (BT) | Exact neighbor count needed to reproduce | 2–15 | Morphogen concentration for mitosis |
-| **3** | Mutation Rate (MR) | Probability of gene mutation | 0–100 (used as MR/100000) | DNA repair fidelity |
+| **3** | Mutation Rate (MR) | Probability of gene mutation | 0–100 (somatic: MR/100000, birth: MR/1000) | DNA repair fidelity |
 | **4** | Dendrite Size (WG) | Number of synaptic weights | 9, 25, 49, or 81 (perfect squares) | Dendritic arbor complexity |
-| **5** | Bias Range (BR) | Initial bias magnitude | 0.001–0.01 | Resting membrane potential range |
+| **5** | Bias Range (BR) | Initial bias magnitude | 0.001 or 0.01 (discrete) | Resting membrane potential range |
 | **6** | Fan-In (AW) | Weight initialization scaling | Count of connected upstream cells | Synaptic normalization factor |
 | **7** | Charge Delta (CD) | Threshold for "significant" activity | 0.000001–0.01 | Activity-dependent survival signal |
 | **8** | Weight Decay (WD) | L2 regularization strength | 1e-6 to 1e-4 | Synaptic protein turnover rate |
@@ -76,7 +76,7 @@ Proteins are the dynamic state that changes every forward/backward pass.
 
 | Protein | What It Is | How It Changes | Biological Analogy |
 |---------|-----------|----------------|-------------------|
-| **Charge** | The cell's activation signal | Forward pass: `bias + sum(upstream_charge × weight)`. Clipped to [−10, 10] | Membrane potential / firing rate |
+| **Charge** | The cell's activation signal | Forward pass: `leaky_ReLU(bias + sum(upstream_charge × weight))`. Clipped to [−10, 10] | Membrane potential / firing rate |
 | **Error** | Backpropagation error signal | Backward pass: accumulated from downstream errors × weights | Retrograde signaling molecules |
 | **Bias** | Baseline offset added before activation | Initialized centered at 0, updated by gradient descent: `bias -= lr × error` | Resting membrane potential |
 | **Weights** | Synaptic connection strengths (1D array) | He-initialized: `randn × √(2/fan_in)`, updated by `w -= lr × gradient + decay × w` | Synaptic receptor density |
@@ -157,13 +157,15 @@ python3 -m neurosim.main
 
 | Key | Action |
 |-----|--------|
-| **Space** | Toggle Game of Life evolution (cells born/die by neighbor count) |
+| **Space** | Toggle running mode (enables evolution loop: Andromida birth/death + pruning) |
 | **A** | Toggle Andromida mode (genetic birth/death using cell genes) |
 | **T** | Toggle training mode (forward pass + optional backprop) |
 | **B** | Toggle backpropagation (error signal + weight updates) |
 | **F / R** | Forward / Reverse charge flow direction |
 | **P** | Toggle activity-based pruning (kills cells with low charge change) |
 | **O** | Toggle gradient-based pruning (kills cells with low gradient) |
+| **=** | Toggle prune logic between AND/OR |
+| **C** | Change charge delta and gradient threshold values |
 | **U** | Toggle autonomous cell genes (per-cell vs global parameters) |
 | **M** | Load MNIST or Fashion-MNIST training data |
 | **G** | Switch genes/proteins display mode |
@@ -179,7 +181,7 @@ python3 -m neurosim.main
 | **W** | Reset gradient tracking |
 | **D** | Toggle display updating (faster training when off) |
 | **H** | Cycle help screens |
-| **Mouse** | Left-click: place/remove cells, Right-click: inspect cell |
+| **Mouse** | Left-click: place/remove cells, Right-click/Ctrl+click: inspect cell, Drag: paint cells |
 
 ## Typical Workflow
 
@@ -194,7 +196,7 @@ python3 -m neurosim.main
 
 ## How Forward/Backward Pass Works
 
-**Forward pass:** Each cell computes its charge as `bias + sum(upstream_cell.charge × weight)` for all cells within dendrite reach in the layer above. The bias acts as the neuron's resting potential — a baseline signal present even with no input. Weight index: `(dx + reach) × matrix_width + (dy + reach)`.
+**Forward pass:** Each cell computes its charge as `leaky_ReLU(bias + sum(upstream_cell.charge × weight))` for all cells within dendrite reach in the layer above. The bias acts as the neuron's resting potential — a baseline signal present even with no input. The leaky ReLU activation (gene 11) introduces nonlinearity, allowing the network to learn non-linear relationships. Weight index: `(dx + reach) × matrix_width + (dy + reach)`.
 
 **Backward pass:** Error propagates through the same dendritic connections in reverse. The reversed weight index `len(weights) − 1 − weight_index` maps to the (−dx, −dy) connection. This is mathematically equivalent to standard backprop through a transposed weight matrix.
 

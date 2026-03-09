@@ -58,41 +58,45 @@ def get_defs():
     """
 
     jmr_defs2 = """
-    Cells inherit these genes from their 
-    parent cells (random independent 
-    selection of two parents if multiple 
-    are available, and then independent 
-    assortment of genes), with a chance of 
-    (germline) mutation based on their 
+    Cells inherit these genes from their
+    parent cells (random independent
+    selection of two parents if multiple
+    are available, and then independent
+    assortment of genes), with a chance of
+    (germline) mutation based on their
     inherited Mutation Rate each cycle.
 
-    The world is made up of 3D grid of 
-    potential cells. Each cell has a set 
-    of genes that determine its behavior. 
-    Each cells is displayed as an 
-    informative 3 x 3 arrangment colored 
-    blocks.			
-                                            
-    allele/ value:	OT      IT      BT
-                    MR      Charge  Error
-                    Bias    Weight  Gradient		
+    The world is made up of 3D grid of
+    potential cells. Each cell has a set
+    of genes that determine its behavior.
+    Each cell is displayed as an
+    informative 3 x 3 arrangement of
+    colored blocks.
 
-    Overcrowding Tolerance (OT): .genes[0]  
-    neighbors <= OT 
-    Isolation Tolerance (IT)   : .genes[1]  
-    neighbors >= IT 
-        
-    Birth Threshold (BT)       : .genes[2]  
+    3x3 Display:  OT      IT      BT
+                  MR      Charge  Error
+                  Bias    Weight  Gradient
+
+    -- Breeding Genes (always per-cell) --
+    Overcrowding Tolerance (OT): .genes[0]
+    neighbors <= OT (cell dies if more)
+    Isolation Tolerance (IT)   : .genes[1]
+    neighbors >= IT (cell dies if fewer)
+    Birth Threshold (BT)       : .genes[2]
     neighbors == BT for birth
-    Mutation Rate (MR)         : .genes[2]
-        
-    OT >=  neighbors >= IT 
-    OT > IT
-    -- Future Genes --
-    Weight Gene (WG)           : .genes[4]
-    Bias Gene (BI)             : .genes[5]
-    Error Gene (ER)            : .genes[6]
-    Charge Gene (CG)           : .genes[7]
+
+    OT >= neighbors >= IT, OT > IT
+
+    -- Network Genes (per-cell when U on) --
+    Mutation Rate (MR)         : .genes[3]
+    Dendrite Size (WG)         : .genes[4]
+    Bias Range (BR)            : .genes[5]
+    Fan-In / Avg Weights (AW)  : .genes[6]
+    Charge Delta (CD)          : .genes[7]
+    Weight Decay (WD)          : .genes[8]
+    Learning Rate (LR)         : .genes[9]
+    Gradient Threshold (GT)    : .genes[10]
+    Activation Slope (AS)      : .genes[11]
     """
 
     conways_defs = """
@@ -251,38 +255,41 @@ def get_defs():
     """
 
     controls = """
-    Mouse Down/Mouse Drag - Places a Cell
-    Mouse Over - Get Cell Info & Statistics
-    Close Window - Quit.
-    Space - Toggle Running (Andromida & Prune/Protection): {running} 
+    Left-click/Drag - Place cells
+    Right-click/Ctrl+click - Inspect cell
+    Close Window - Quit
+
+    Space - Toggle Running (evolution loop)
     while running:
-        U - Toggle Autonomous Network Genes: {autonomous_network_genes}
-        A - Andromida_mode to allow normal 
-        growth rules: {andromida_mode}  
-        C - Change & Gradient Prune & Protection: {charge_change_protection, delta :.4f}
-        
-        P - Toggle Charge Prune: {prune} 
-        = Toggle Prune Logic AND/OR: {prune_logic}
-        O - Toggle Gradient Prune: {gradient_prune}
-            
-    T - Toggle Training: {training_mode}                                  
-        I - Set Learning Rate: {learning_rate :.4f}
-        F - Forward Prop, or R - Reverse 
-        Forward Prop: {direction_of_charge_flow}
-        B - Toggle Back Prop: {back_prop}                                  
-        
-    G - Toggle Protein/Gene display: 
-    {display}   
-    X - Reset network genes and proteins, weights, decay and biases cell autonomously or globally 
-    values         
-    D - Toggle Display updates: {display_updating}
-    V - View all settings
-    H - Scroll through help screens  
-    L - Load layers     
-    S - Save layers     
-    M - load MNEST training data    
-    E - Enter Paramaters  
+        U - Toggle Autonomous Network Genes
+        A - Toggle Andromida mode (genetic
+            birth/death rules)
+        C - Change Charge Delta & Gradient
+            Threshold
+        P - Toggle Activity Prune (charge)
+        = - Toggle Prune Logic AND/OR
+        O - Toggle Gradient Prune
+
+    T - Toggle Training
+        I - Set Learning Rate
+        F - Forward Prop direction
+        R - Reverse Prop direction
+        B - Toggle Back Prop
+
+    G - Toggle Protein/Gene display
+    X - Reset network genes and proteins
+    D - Toggle Display updates
+    V - Cycle statistics views
+    H - Scroll through help screens
+    W - Reset gradient tracking
+    Q - Dump telemetry report
+    L - Load layers
+    S - Save layers
+    M - Load MNIST training data
+    E - Enter Parameters
     N - Nuke all cells
+    3 - Toggle 3D OpenGL view
+    4 - Toggle 3D backprop view
     """
 
     return jmr_defs, jmr_defs2, conways_defs, how_network_works, forward_pass, how_backprop_works, how_backprop_works2, controls

@@ -214,17 +214,20 @@ class Cell:
         Note: only genes 0-8 are shown in the 3x3 cell display grid;
         genes 9-11 are visible via right-click inspect and telemetry.
         """
-        # Breeding genes 0-3: use standard color palette
+        # Breeding genes 0-3: scale each RGB component of the COLORS palette by gene value
         self.colors = [
-            tuple(max(0, min(int(gene * 255 // 15), 255)) for color_component in color)
+            tuple(max(0, min(int(color_component * gene // 15), 255)) for color_component in color)
             for gene, color in zip(self.genes[:4], COLORS)
         ]
         # Network genes 4-8: scale to 0-255 range
         gene_4_scaled = max(0, min(int(((self.genes[4] - 9) / (81 - 9)) * 255), 255))
         gene_5_scaled = max(0, min(int(self.genes[5] * 255), 255))
         gene_6_scaled = max(0, min(int(((self.genes[6] - 5) / (30 - 5)) * 255), 255))
-        gene_7_scaled = max(0, min(int(((self.genes[7] - 0.0001) / (0.01 - 0.0001)) * 255), 255))
-        gene_8_scaled = max(0, min(int(((self.genes[8] - 1e-6) / (1e-4 - 1e-6)) * 255), 255))
+        # Gene 7 (CD) and Gene 8 (WD): log-scale coloring to match log-uniform ranges
+        gene_7_val = max(1e-6, min(self.genes[7], 1e-2))
+        gene_7_scaled = max(0, min(int(((np.log10(gene_7_val) + 6) / 4) * 255), 255))
+        gene_8_val = max(1e-6, min(self.genes[8], 1e-4))
+        gene_8_scaled = max(0, min(int(((np.log10(gene_8_val) + 6) / 2) * 255), 255))
         self.colors.extend([
             (gene_4_scaled, 0, gene_4_scaled),     # Gene 4 WG: purple
             (0, gene_5_scaled, gene_5_scaled),     # Gene 5 BR: cyan
@@ -249,7 +252,7 @@ class Cell:
         epsilon = 1e-8
 
         bias_range = self.genes[5]
-        bias_scaled = max(0, min(int((self.bias / (bias_range + epsilon)) * 255), 255))
+        bias_scaled = max(0, min(int((abs(self.bias) / (bias_range + epsilon)) * 255), 255))
         self.protein_colors[0] = (bias_scaled, 0, bias_scaled)
 
         max_forward_charge_scaled = max(0, min(int((self.max_charge_diff_forward / (1.0 + epsilon)) * 255), 255))
@@ -261,7 +264,7 @@ class Cell:
         charge_scaled = max(0, min(int(self.charge * 255), 255))
         self.protein_colors[4] = (charge_scaled, 0, 0)
 
-        error_magnitude = abs(self.error + epsilon)
+        error_magnitude = abs(self.error) + epsilon
         error_scaled = max(0, min(int(255 * (np.log10(error_magnitude) + 3) / 2), 255))
         self.protein_colors[6] = (0, 0, error_scaled)
 
@@ -287,25 +290,15 @@ class Cell:
         """
         self.__dict__.update(state)
 
-        # Very old pickles: may have fewer than 9 genes
+        # Very old pickles: may have fewer than 9 genes — reinitialize everything
         if not hasattr(self, 'genes') or len(self.genes) < 9:
+            cfg = Cell._config
             self.genes = [0] * 12
-            if not hasattr(self.genes[3], '__int__'):
-                self.initalize_breeding_genes()
-            if not hasattr(self.genes[4], '__int__'):
-                cfg = Cell._config
-                if cfg:
-                    self.initalize_network_genes(cfg.number_of_weights, cfg.bias_range,
-                                                 cfg.avg_weights_cell, cfg.charge_delta,
-                                                 cfg.weight_decay, cfg.mutation_rate)
-            if not hasattr(self.genes[5], '__float__'):
-                self.genes[5] = Cell._config.bias_range if Cell._config else 0.01
-            if not hasattr(self.genes[6], '__float__'):
-                self.genes[6] = Cell._config.avg_weights_cell if Cell._config else 5
-            if not hasattr(self.genes[7], '__float__'):
-                self.genes[7] = Cell._config.charge_delta if Cell._config else 0.001
-            if not hasattr(self.genes[8], '__float__'):
-                self.genes[8] = Cell._config.weight_decay if Cell._config else 1e-6
+            self.initalize_breeding_genes()
+            if cfg:
+                self.initalize_network_genes(cfg.number_of_weights, cfg.bias_range,
+                                             cfg.avg_weights_cell, cfg.charge_delta,
+                                             cfg.weight_decay, cfg.mutation_rate)
 
         # Migrate 9-gene cells to 12-gene cells (added genes 9=LR, 10=GT, 11=AS)
         if len(self.genes) < 12:
@@ -370,7 +363,7 @@ class Cell:
     # ---- Forward pass: weights are in THIS cell's dendrites ----
     # Unlike traditional NNs where weights live in layer-to-layer matrices,
     # here each cell OWNS its weights in self.weights (a flat 1D array).
-    # Forward: charge = sum(upstream_cell.charge * my_weight[index])
+    # Forward: charge = bias + sum(upstream_cell.charge * my_weight[index]), then leaky ReLU
     # Weight index: (dx + reach) * matrix_width + (dy + reach)
 
     def compute_total_charge(self, upper_layer_cells, reach):
@@ -550,7 +543,7 @@ class Cell:
             self.gradient = gradient
             self.update_gradient_importance(gradient)
             weight_index = (dx + reach) * WEIGHT_MATRIX + (dy + reach)
-            if weight_index < len(self.weights):
+            if 0 <= weight_index < len(self.weights):
                 self.weights[weight_index] -= learning_rate * gradient + weight_decay * self.weights[weight_index]
 
         self.bias -= learning_rate * self.error
@@ -597,11 +590,17 @@ class Cell:
             self.significant_gradient_change = True
 
     def reset_directional_charge_history(self, direction):
-        if direction == "+++++>>>>>":
+        """Reset charge history for a specific direction.
+
+        Args:
+            direction: "forward" or "reverse" (matches update_charge convention).
+                       Also accepts legacy flow strings "+++++>>>>>" / "<<<<<-----".
+        """
+        if direction in ("forward", "+++++>>>>>"):
             self.forward_charges.clear()
             self.max_charge_diff_forward = 0
             self.significant_charge_change_forward = False
-        elif direction == "<<<<<-----":
+        elif direction in ("reverse", "<<<<<-----"):
             self.reverse_charges.clear()
             self.max_charge_diff_reverse = 0
             self.significant_charge_change_reverse = False
@@ -659,11 +658,16 @@ class Cell:
     # ---- Cell autonomy methods (Phase 4) ----
 
     def forward(self, cells_array):
-        """Self-contained forward pass for this cell."""
+        """Self-contained forward pass for this cell.
+
+        Steps: gather upstream cells → compute weighted sum + bias → apply leaky ReLU → track charge.
+        """
         cfg = Cell._config
         reach = self.reach if (cfg and cfg.autonomous_network_genes) else cfg.length_of_dendrite
         upper_cells = self.get_upper_layer_cells(cells_array, reach)
         self.compute_total_charge(upper_cells, reach)
+        # Apply leaky ReLU activation (gene 11 controls slope)
+        self.charge = float(self.relu(self.charge))
         self.update_charge(self.charge, "forward")
 
     def backward(self, cells_array, learning_rate=None, max_reach_below=None):

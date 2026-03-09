@@ -185,7 +185,7 @@ def rebuild_3d_cache(state, config):
                 else:
                     reach = cell.reach if config.autonomous_network_genes else config.length_of_dendrite
                     prev_z = float((layer - 1) * 2 - nl)
-                    wm = config.weight_matrix
+                    wm = int(np.sqrt(cell.genes[4])) if config.autonomous_network_genes else config.weight_matrix
                     for dx in range(-reach, reach + 1):
                         nx = x + dx
                         if nx < 0 or nx >= WIDTH:
@@ -640,7 +640,7 @@ def render_3d_backprop(state, config, current_layer, current_pos):
         # Connections to upper layer (dendrite inputs)
         if current_layer > 0:
             reach = cell.reach if config.autonomous_network_genes else config.length_of_dendrite
-            wm = config.weight_matrix
+            wm = int(np.sqrt(cell.genes[4])) if config.autonomous_network_genes else config.weight_matrix
             prev_z = float((current_layer - 1) * 2 - nl)
             for dx in range(-reach, reach + 1):
                 for dy in range(-reach, reach + 1):

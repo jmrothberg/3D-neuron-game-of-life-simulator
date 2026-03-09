@@ -341,15 +341,13 @@ def main():
                     else:
                         screen = pygame.display.set_mode((EXTENDED_WINDOW_WIDTH, EXTENDED_WINDOW_HEIGHT))
 
-                # ---- 4: toggle backprop 3D view ----
+                # ---- 4: toggle backprop 3D view (always forces 3D on) ----
                 elif event.key == pygame.K_4:
-                    state.show_3d_view = True
                     state.show_backprop_view = not state.show_backprop_view
-                    if state.show_3d_view:
+                    if state.show_backprop_view:
+                        state.show_3d_view = True
                         pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
                         setup_3d_view()
-                    else:
-                        screen = pygame.display.set_mode((EXTENDED_WINDOW_WIDTH, EXTENDED_WINDOW_HEIGHT))
 
                 # ---- Q: dump telemetry/validation report ----
                 elif event.key == pygame.K_q and not state.show_3d_view:

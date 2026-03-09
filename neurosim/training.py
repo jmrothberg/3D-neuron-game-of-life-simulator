@@ -80,7 +80,7 @@ def prediction_to_actual(state, config):
 
 
 def train_network(state, config, render_backprop_fn=None):
-    """Single epoch: forward or reverse pass, then optionally backprop."""
+    """Run state.epochs iterations: forward or reverse pass, then optionally backprop."""
     for epoch in range(state.epochs):
         if state.direction_of_charge_flow == "+++++>>>>>":
             forward_propagation(state, config)
