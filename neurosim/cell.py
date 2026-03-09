@@ -18,9 +18,9 @@ Each cell is an autonomous agent with two types of information:
       6  AW  Fan-In (Avg Weights)    -- weight initialization scaling factor
       7  CD  Charge Delta            -- threshold for "significant" activity
       8  WD  Weight Decay            -- L2 regularization per cell
-      9  LR  Learning Rate           -- synaptic plasticity speed
-     10  GT  Gradient Threshold      -- survival signal sensitivity for pruning
-     11  AS  Activation Slope        -- leaky ReLU negative slope (neuron excitability)
+      9  LR  Learning Rate           -- synaptic plasticity speed (0.003-0.05)
+     10  GT  Gradient Threshold      -- survival signal sensitivity for pruning (log-uniform 1e-8 to 1e-4)
+     11  AS  Activation Slope        -- leaky ReLU negative slope (0.01-0.3, selectivity)
 
   PROTEINS (5 values) -- dynamic, mutable state that changes every training step.
   Proteins are the cell's *phenotype* -- the expressed behavior that results from
@@ -157,18 +157,23 @@ class Cell:
             else:
                 self.genes[6] = Avg_Weights_Cell
             # Gene 7 (CD): charge delta -- activity-dependent survival signal
-            self.genes[7] = np.random.uniform(0.000001, 0.01)
+            # Log-uniform: spans 4 orders of magnitude (1e-6 to 1e-2)
+            self.genes[7] = 10 ** np.random.uniform(-6, -2)
             # Gene 8 (WD): weight decay -- synaptic protein turnover rate
-            self.genes[8] = np.random.uniform(1e-6, 1e-4)
+            # Log-uniform: spans 2 orders of magnitude (1e-6 to 1e-4)
+            self.genes[8] = 10 ** np.random.uniform(-6, -4)
             # Gene 9 (LR): learning rate -- synaptic plasticity speed
             # Like hippocampal (high) vs cortical (low) plasticity
-            self.genes[9] = np.random.uniform(0.001, 0.1)
+            # Narrowed range: 0.003-0.05 avoids extreme instability or sluggishness
+            self.genes[9] = np.random.uniform(0.003, 0.05)
             # Gene 10 (GT): gradient threshold -- survival signal sensitivity
-            # Like neurotrophic factor receptor density
-            self.genes[10] = np.random.uniform(1e-8, 1e-4)
+            # Log-uniform: spans 4 orders of magnitude (1e-8 to 1e-4)
+            # Without log-uniform, 99.99% of cells would get values near 1e-4
+            self.genes[10] = 10 ** np.random.uniform(-8, -4)
             # Gene 11 (AS): activation slope -- neuron response curve
-            # From near-ReLU (0.01, sharp cutoff) to very leaky (0.5, gradual)
-            self.genes[11] = np.random.uniform(0.01, 0.5)
+            # From near-ReLU (0.01, selective) to moderately leaky (0.3, permissive)
+            # 0.3 max avoids extreme leakiness that weakens feature detection
+            self.genes[11] = np.random.uniform(0.01, 0.3)
 
         self.color_genes()
 
@@ -189,13 +194,16 @@ class Cell:
         self.reach = (int(np.sqrt(self.genes[4])) - 1) // 2
         # Protein 4: weights -- synaptic strengths, stored in THIS cell's dendrites
         # Size determined by gene 4 (WG), scaling by gene 6 (AW / fan-in)
+        # He initialization: randn * sqrt(2 / fan_in) -- optimal for ReLU/leaky ReLU
+        fan_in = max(self.genes[6], 1)
         self.weights = np.clip(
-            np.random.randn(int(self.genes[4])) / (np.sqrt(self.genes[6]) + 1e-8),
-            -0.8, 0.8
+            np.random.randn(int(self.genes[4])) * np.sqrt(2.0 / (fan_in + 1e-8)),
+            -1.0, 1.0
         )
         # Protein 5: bias -- offset to activation (like resting potential)
+        # Centered at 0 so the network can learn positive or negative offsets
         # Range determined by gene 5 (BR)
-        self.bias = np.random.uniform(0, self.genes[5])
+        self.bias = np.random.uniform(-self.genes[5], self.genes[5])
 
     def color_genes(self):
         """Map each gene to an RGB color for visualization.
@@ -225,10 +233,10 @@ class Cell:
             (0, 0, gene_8_scaled)                  # Gene 8 WD: blue
         ])
         # Autonomy genes 9-11: new color channels
-        gene_9_scaled = max(0, min(int(((self.genes[9] - 0.001) / (0.1 - 0.001)) * 255), 255))
+        gene_9_scaled = max(0, min(int(((self.genes[9] - 0.003) / (0.05 - 0.003)) * 255), 255))
         gene_10_val = max(1e-8, min(self.genes[10], 1e-4))
         gene_10_scaled = max(0, min(int(((np.log10(gene_10_val) + 8) / 4) * 255), 255))
-        gene_11_scaled = max(0, min(int(((self.genes[11] - 0.01) / (0.5 - 0.01)) * 255), 255))
+        gene_11_scaled = max(0, min(int(((self.genes[11] - 0.01) / (0.3 - 0.01)) * 255), 255))
         self.colors.extend([
             (0, gene_9_scaled, gene_9_scaled),     # Gene 9 LR: cyan
             (gene_10_scaled, 0, gene_10_scaled),   # Gene 10 GT: magenta
@@ -350,7 +358,11 @@ class Cell:
 
         if np.isnan(self.weights).any():
             print(f"Warning: NaN weights detected in cell at ({self.x}, {self.y}, {self.layer})")
-            self.weights = np.random.randn(self.genes[4]) / np.sqrt(self.genes[6])
+            fan_in = max(self.genes[6], 1)
+            self.weights = np.clip(
+                np.random.randn(int(self.genes[4])) * np.sqrt(2.0 / (fan_in + 1e-8)),
+                -1.0, 1.0
+            )
 
         if not hasattr(self, 'protein_colors'):
             self.color_proteins()
@@ -362,6 +374,12 @@ class Cell:
     # Weight index: (dx + reach) * matrix_width + (dy + reach)
 
     def compute_total_charge(self, upper_layer_cells, reach):
+        """Forward pass: charge = bias + sum(upstream_charge * weight).
+
+        Each cell computes its activation from the cells in the layer above,
+        using its own dendritic weights.  Bias is added as a baseline signal
+        (like a neuron's resting membrane potential).
+        """
         cfg = Cell._config
         if cfg and cfg.autonomous_network_genes:
             reach = self.reach
@@ -369,7 +387,7 @@ class Cell:
             WEIGHT_MATRIX = int(np.sqrt(NUMBER_OF_WEIGHTS))
         else:
             WEIGHT_MATRIX = 2 * reach + 1
-        charge = 0
+        charge = self.bias  # Start with bias (resting potential)
         for dx, dy, cell in upper_layer_cells:
             weight_index = (dx + reach) * WEIGHT_MATRIX + (dy + reach)
             if 0 <= weight_index < len(self.weights):
@@ -377,13 +395,16 @@ class Cell:
         self.charge = np.clip(charge, -10, 10)
 
     def compute_total_charge_reverse(self, lower_layer_cells, reach):
+        """Reverse pass: charge flows backward for visualization.
+
+        Uses bias as baseline, same as forward pass.
+        """
         cfg = Cell._config
         if cfg and cfg.autonomous_network_genes:
             pass  # each cell below uses its own reach
         else:
             WEIGHT_MATRIX = 2 * reach + 1
-        charge = 0
-        charge -= self.bias
+        charge = self.bias  # Start with bias (same as forward pass)
         for dx, dy, cell in lower_layer_cells:
             if cfg and cfg.autonomous_network_genes:
                 cell_reach = cell.reach
@@ -400,10 +421,10 @@ class Cell:
 
     # ---- Activation functions ----
     # Gene 11 (AS) controls the negative-region slope of leaky ReLU.
-    # Low slope (0.01) = sharp cutoff, like a classic ReLU neuron.
-    # High slope (0.5) = very leaky, gradual response -- more signal passes through.
-    # In biology, different neuron types have different response curves:
-    # excitatory pyramidal cells vs inhibitory interneurons, for example.
+    # Low slope (0.01) = selective neuron: strongly suppresses negative inputs.
+    # High slope (0.3) = permissive neuron: passes more of the signal through.
+    # In biology, different neuron types have different response curves --
+    # this gene lets evolution discover what mix of selectivity works best.
 
     def relu(self, x):
         """Leaky ReLU activation. Negative slope from gene 11 (activation slope)."""
@@ -607,7 +628,8 @@ class Cell:
 
         if len(self.weights) not in [9, 25, 49, 81, 121, 169, 225, 289, 361, 441, 529, 625]:
             print("bad mutant gene repaired")
-            self.weights = np.random.randn(new_matrix ** 2) / (np.sqrt(self.genes[6]) + 1e-8)
+            fan_in = max(self.genes[6], 1)
+            self.weights = np.random.randn(new_matrix ** 2) * np.sqrt(2.0 / (fan_in + 1e-8))
             self.genes[4] = len(self.weights)
             return
 
@@ -627,7 +649,8 @@ class Cell:
         if new_matrix > old_matrix:
             mask = new_grid == 0
             num_new_weights = np.sum(mask)
-            new_weights = np.random.randn(num_new_weights) / (np.sqrt(self.genes[6]) + 1e-8)
+            fan_in = max(self.genes[6], 1)
+            new_weights = np.random.randn(num_new_weights) * np.sqrt(2.0 / (fan_in + 1e-8))
             new_grid[mask] = new_weights
 
         self.weights = new_grid.flatten()
@@ -701,9 +724,10 @@ class Cell:
         issues = []
         if np.isnan(self.weights).any():
             issues.append(f"NaN weights at ({self.x},{self.y},{self.layer})")
+            fan_in = max(self.genes[6], 1)
             self.weights = np.clip(
-                np.random.randn(int(self.genes[4])) / (np.sqrt(self.genes[6]) + 1e-8),
-                -0.8, 0.8
+                np.random.randn(int(self.genes[4])) * np.sqrt(2.0 / (fan_in + 1e-8)),
+                -1.0, 1.0
             )
         if np.isnan(self.charge):
             issues.append(f"NaN charge at ({self.x},{self.y},{self.layer})")

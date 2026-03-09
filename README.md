@@ -43,9 +43,9 @@ Genes 0–2 control **survival and reproduction** (Game of Life rules). Genes 3�
 | **6** | Fan-In (AW) | Weight initialization scaling | Count of connected upstream cells | Synaptic normalization factor |
 | **7** | Charge Delta (CD) | Threshold for "significant" activity | 0.000001–0.01 | Activity-dependent survival signal |
 | **8** | Weight Decay (WD) | L2 regularization strength | 1e-6 to 1e-4 | Synaptic protein turnover rate |
-| **9** | Learning Rate (LR) | Synaptic plasticity speed | 0.001–0.1 | Hippocampal vs cortical plasticity |
-| **10** | Gradient Threshold (GT) | Pruning survival sensitivity | 1e-8 to 1e-4 | Neurotrophic factor receptor density |
-| **11** | Activation Slope (AS) | Leaky ReLU negative slope | 0.01–0.5 | Neuron response curve / excitability |
+| **9** | Learning Rate (LR) | Synaptic plasticity speed | 0.003–0.05 | Hippocampal vs cortical plasticity |
+| **10** | Gradient Threshold (GT) | Pruning survival sensitivity | 1e-8 to 1e-4 (log-uniform) | Neurotrophic factor receptor density |
+| **11** | Activation Slope (AS) | Leaky ReLU negative slope | 0.01–0.3 | Neuron selectivity / response curve |
 
 ### Why Genes 9–11 Matter
 
@@ -53,7 +53,11 @@ Genes 0–2 control **survival and reproduction** (Game of Life rules). Genes 3�
 
 **Gene 10 (Gradient Threshold)** controls how sensitive a cell is to pruning. Cells with a low threshold survive even with minimal learning signal; cells with a high threshold must be actively learning or they die. This creates Darwinian selection pressure: only cells that contribute to the network survive.
 
-**Gene 11 (Activation Slope)** controls the neuron's response curve. A low slope (0.01) means near-zero response to negative inputs (like classic ReLU). A high slope (0.5) passes much more negative signal through (very leaky). In biology, excitatory and inhibitory neurons have fundamentally different response profiles — this gene lets evolution discover that diversity.
+**Gene 11 (Activation Slope)** controls the neuron's selectivity. A low slope (0.01) means the neuron strongly suppresses negative inputs — it's highly selective, only responding to positive signals (like classic ReLU). A high slope (0.3) means the neuron is more permissive, passing more of the signal through even when negative. This doesn't create "inhibitory neurons" — all neurons still use the same weighted-sum-plus-bias computation. Instead, it controls *how picky* each neuron is about its inputs. Evolution can discover the right mix of selective vs permissive neurons for optimal feature detection.
+
+### Why Log-Uniform Distributions Matter
+
+Genes 7 (Charge Delta), 8 (Weight Decay), and 10 (Gradient Threshold) span multiple orders of magnitude — for example, gene 10 ranges from 0.00000001 to 0.0001. If you use a simple uniform random distribution over that range, 99.99% of values would land between 0.00009 and 0.0001 — the bottom of the range is effectively invisible. **Log-uniform sampling** (`10^uniform(-8, -4)`) ensures equal probability across *each order of magnitude*, so a cell is equally likely to get a threshold of 1e-7 as 1e-5. This produces genuine diversity in survival sensitivity, decay rate, and activity thresholds — which is exactly what evolution needs to work with.
 
 ### Gene 4 (Dendrite Size) Detail
 
@@ -72,10 +76,10 @@ Proteins are the dynamic state that changes every forward/backward pass.
 
 | Protein | What It Is | How It Changes | Biological Analogy |
 |---------|-----------|----------------|-------------------|
-| **Charge** | The cell's activation signal | Forward pass: weighted sum of upstream charges. Clipped to [−10, 10] | Membrane potential / firing rate |
+| **Charge** | The cell's activation signal | Forward pass: `bias + sum(upstream_charge × weight)`. Clipped to [−10, 10] | Membrane potential / firing rate |
 | **Error** | Backpropagation error signal | Backward pass: accumulated from downstream errors × weights | Retrograde signaling molecules |
-| **Bias** | Offset added to activation | Updated by gradient descent: `bias -= lr × error` | Resting potential / intrinsic excitability |
-| **Weights** | Synaptic connection strengths (1D array) | Updated by gradient descent: `w -= lr × gradient + decay × w` | Synaptic receptor density |
+| **Bias** | Baseline offset added before activation | Initialized centered at 0, updated by gradient descent: `bias -= lr × error` | Resting membrane potential |
+| **Weights** | Synaptic connection strengths (1D array) | He-initialized: `randn × √(2/fan_in)`, updated by `w -= lr × gradient + decay × w` | Synaptic receptor density |
 | **Gradient** | Most recent learning signal | `error × upstream_charge`, clipped | Calcium/CaMKII activity level |
 
 ### How Genes and Proteins Interact
@@ -108,9 +112,9 @@ The `U` key toggles `autonomous_network_genes`:
 | 3 (mutation rate) | Same for all cells | Random per cell |
 | 4 (dendrite size) | Same for all cells | Random: 9, 25, or 49 |
 | 5–8 (network) | Same for all cells | Random per cell |
-| 9 (learning rate) | Same `config.learning_rate` | Random 0.001–0.1 |
-| 10 (gradient threshold) | Same `config.gradient_threshold` | Random 1e-8 to 1e-4 |
-| 11 (activation slope) | Same `config.activation_slope` | Random 0.01–0.5 |
+| 9 (learning rate) | Same `config.learning_rate` | Random 0.003–0.05 |
+| 10 (gradient threshold) | Same `config.gradient_threshold` | Log-uniform 1e-8 to 1e-4 |
+| 11 (activation slope) | Same `config.activation_slope` | Random 0.01–0.3 |
 
 ---
 
@@ -190,7 +194,7 @@ python3 -m neurosim.main
 
 ## How Forward/Backward Pass Works
 
-**Forward pass:** Each cell computes its charge by summing `(upstream_cell.charge × weight)` for all cells within dendrite reach in the layer above. Weight index: `(dx + reach) × matrix_width + (dy + reach)`.
+**Forward pass:** Each cell computes its charge as `bias + sum(upstream_cell.charge × weight)` for all cells within dendrite reach in the layer above. The bias acts as the neuron's resting potential — a baseline signal present even with no input. Weight index: `(dx + reach) × matrix_width + (dy + reach)`.
 
 **Backward pass:** Error propagates through the same dendritic connections in reverse. The reversed weight index `len(weights) − 1 − weight_index` maps to the (−dx, −dy) connection. This is mathematically equivalent to standard backprop through a transposed weight matrix.
 
