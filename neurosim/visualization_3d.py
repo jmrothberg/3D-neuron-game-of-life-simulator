@@ -25,8 +25,11 @@ _output_range = (0, 0)
 _cell_count = 0
 _conn_count = 0
 
-# Parallel list of (cell_ref, layer) for each neuron — used to refresh colors each frame
-_neuron_cell_refs = []     # [(cell, layer), ...] same order as _neuron_verts
+# Parallel list of (x, y, layer) for each neuron — used to refresh colors each frame.
+# We store COORDINATES, not cell references, because input/output layer cells are
+# replaced with new objects every training step (from training data arrays).
+# By storing coordinates we always look up the CURRENT cell, not a stale reference.
+_neuron_cell_refs = []     # [(x, y, layer), ...] same order as _neuron_verts
 
 # HUD texture cache
 _hud_texture_id = None
@@ -127,7 +130,7 @@ def rebuild_3d_cache(state, config):
     # Allocate neuron arrays — sorted: input, hidden, output
     nv = np.empty((total_neurons, 3), dtype=np.float32)
     nc = np.empty((total_neurons, 3), dtype=np.float32)
-    cell_refs = [None] * total_neurons  # parallel array: (cell, layer)
+    cell_refs = [None] * total_neurons  # parallel array: (x, y, layer) coordinates
 
     # Estimate connection count (will trim later)
     conn_list_v = []
@@ -165,7 +168,7 @@ def rebuild_3d_cache(state, config):
 
                 nv[idx] = (px, py, z)
                 nc[idx] = (r, g, b)
-                cell_refs[idx] = (cell, layer)
+                cell_refs[idx] = (x, y, layer)  # store coords, not cell ref
 
                 # --- Connections (hidden + output layers only) ---
                 if layer == 0:
@@ -231,21 +234,28 @@ def rebuild_3d_cache(state, config):
     state._3d_dirty = False
 
 
-def _refresh_neuron_colors(config):
+def _refresh_neuron_colors(state, config):
     """Update neuron colors from live cell charges — called every frame.
 
-    This is cheap: just iterate the cell_refs list and rewrite the color array.
-    No geometry rebuild, no connection rebuild.  Keeps 3D display dynamic like 2D.
+    Looks up each cell by (x, y, layer) coordinates from state.cells.
+    This is essential because input/output layer cells are REPLACED with new
+    objects every training step (from training data arrays).  If we held stale
+    cell references, those layers would never visually update.
     """
     global _neuron_colors
     if _neuron_colors is None or not _neuron_cell_refs:
         return
     nl = config.num_layers
+    cells = state.cells
     for i, ref in enumerate(_neuron_cell_refs):
         if ref is None:
             continue
-        cell, layer = ref
-        _neuron_colors[i] = _layer_color(layer, nl, cell.charge)
+        x, y, layer = ref
+        cell = cells[x, y, layer]
+        if cell is not None:
+            _neuron_colors[i] = _layer_color(layer, nl, cell.charge)
+        else:
+            _neuron_colors[i] = (0.1, 0.1, 0.1)  # dim if cell was removed
 
 
 # ---------------------------------------------------------------------------
@@ -466,8 +476,10 @@ def render_3d_network(state, config):
     if state._3d_dirty or _neuron_verts is None:
         rebuild_3d_cache(state, config)
 
-    # Refresh colors every frame from live cell charges
-    _refresh_neuron_colors(config)
+    # Refresh colors every frame from live cell charges (must pass state
+    # so we look up CURRENT cells — input/output layers get new cell objects
+    # each training step)
+    _refresh_neuron_colors(state, config)
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
@@ -538,8 +550,8 @@ def render_3d_backprop(state, config, current_layer, current_pos):
     if state._3d_dirty or _neuron_verts is None:
         rebuild_3d_cache(state, config)
 
-    # Refresh colors from live charges
-    _refresh_neuron_colors(config)
+    # Refresh colors from live charges (pass state for current cell lookup)
+    _refresh_neuron_colors(state, config)
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
