@@ -59,6 +59,7 @@ class SimConfig:
     gradient_threshold: float = 0.0000001
     gradient_clip_range: int = 1
     weight_change_threshold: float = 0.005
+    activation_slope: float = 0.1        # Leaky ReLU negative slope (gene 11 default)
 
     # Data
     how_much_training_data: int = 20

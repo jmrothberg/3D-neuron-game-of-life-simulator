@@ -1,4 +1,37 @@
 """Cell class -- the fundamental unit of the neural simulator.
+
+Each cell is an autonomous agent with two types of information:
+
+  GENES (12 values) -- inherited, mostly stable parameters defining the cell's
+  identity and structure.  Genes are the cell's *genotype*.  They change only
+  through mutation or crossover during reproduction.
+
+    Breeding genes (0-2):  control survival and reproduction (Game of Life rules)
+      0  OT  Overcrowding Tolerance -- max neighbors before death
+      1  IT  Isolation Tolerance    -- min neighbors before death
+      2  BT  Birth Threshold        -- exact neighbor count to reproduce
+
+    Network genes (3-11): control learning and connectivity
+      3  MR  Mutation Rate           -- probability of gene mutation
+      4  WG  Dendrite Size (Weights) -- number of synaptic weights (9,25,49,81)
+      5  BR  Bias Range              -- initial bias magnitude
+      6  AW  Fan-In (Avg Weights)    -- weight initialization scaling factor
+      7  CD  Charge Delta            -- threshold for "significant" activity
+      8  WD  Weight Decay            -- L2 regularization per cell
+      9  LR  Learning Rate           -- synaptic plasticity speed
+     10  GT  Gradient Threshold      -- survival signal sensitivity for pruning
+     11  AS  Activation Slope        -- leaky ReLU negative slope (neuron excitability)
+
+  PROTEINS (5 values) -- dynamic, mutable state that changes every training step.
+  Proteins are the cell's *phenotype* -- the expressed behavior that results from
+  genes interacting with the environment.
+
+    charge   -- the cell's activation signal (like membrane potential)
+    error    -- backpropagation error signal (like retrograde signaling)
+    bias     -- offset to activation (like resting potential)
+    weights  -- synaptic connection strengths (stored in dendrites, NOT in layer matrices)
+    gradient -- most recent learning signal (like calcium/CaMKII activity)
+
 Weights are stored IN the cell's dendrites (self.weights), not in separate layers.
 """
 import numpy as np
@@ -8,7 +41,12 @@ from neurosim.config import COLORS, WIDTH, HEIGHT
 
 
 class Cell:
-    """A neuron-cell with genes, proteins (charge/error/bias/weights), and dendrites."""
+    """A neuron-cell with 12 genes, 5 proteins, and dendritic weights.
+
+    Two timescales:
+      - Fast: proteins change every training step (gradient descent)
+      - Slow: genes change across generations (evolution and mutation)
+    """
 
     # Class-level config reference -- set once at startup, NOT pickled.
     _config = None
@@ -59,9 +97,10 @@ class Cell:
         self.significant_gradient_change = False
 
     def initalize_all_genes(self):
-        self.genes = [0] * 9
-        self.colors = [0] * 9
-        self.protein_colors = [0] * 9
+        # 12 genes: 0-2 breeding, 3-8 original network, 9-11 new autonomy genes
+        self.genes = [0] * 12
+        self.colors = [0] * 12
+        self.protein_colors = [0] * 12
 
     def initalize_breeding_genes(self):
         cfg = Cell._config
@@ -76,22 +115,39 @@ class Cell:
 
     def initalize_network_genes(self, weights_per_cell_possible, Bias_Range, Avg_Weights_Cell,
                                 charge_delta, weight_decay, mutation_rate, cells_array=None):
+        """Initialize network genes (3-11).
+
+        Two modes controlled by config.autonomous_network_genes:
+          - Non-autonomous: all cells get the SAME values from global config
+          - Autonomous: each cell gets RANDOM values, subject to evolution
+        """
         cfg = Cell._config
         autonomous = cfg.autonomous_network_genes if cfg else False
 
         if not autonomous:
-            self.genes[3] = mutation_rate
-            self.genes[4] = int(weights_per_cell_possible)
-            self.genes[5] = Bias_Range
-            self.genes[6] = Avg_Weights_Cell
-            self.genes[7] = charge_delta
-            self.genes[8] = weight_decay
+            # ---- Non-autonomous: stamp all network genes from global config ----
+            self.genes[3] = mutation_rate                # MR: mutation frequency
+            self.genes[4] = int(weights_per_cell_possible)  # WG: dendrite size
+            self.genes[5] = Bias_Range                   # BR: bias initialization range
+            self.genes[6] = Avg_Weights_Cell             # AW: fan-in for weight scaling
+            self.genes[7] = charge_delta                 # CD: activity significance threshold
+            self.genes[8] = weight_decay                 # WD: L2 regularization strength
+            # New genes 9-11: stamp from global config
+            self.genes[9] = cfg.learning_rate if cfg else 0.01       # LR: synaptic plasticity rate
+            self.genes[10] = cfg.gradient_threshold if cfg else 1e-7  # GT: pruning survival sensitivity
+            self.genes[11] = cfg.activation_slope if cfg else 0.1     # AS: leaky ReLU negative slope
         else:
+            # ---- Autonomous: each cell gets its own random values ----
+            # Gene 3 (MR): mutation frequency -- higher = more genetic drift
             self.genes[3] = np.random.randint(0, 100)
-            self.genes[4] = (np.random.randint(1, 4) * 2 + 1) ** 2
+            # Gene 4 (WG): dendrite size -- determines receptive field
+            # Like biological neurons with varying dendritic complexity
+            self.genes[4] = (np.random.randint(1, 4) * 2 + 1) ** 2  # 9, 25, or 49
+            # Gene 5 (BR): bias range -- resting potential variability
             self.genes[5] = np.random.choice([0.001, 0.01])
             self.reach = (int(np.sqrt(self.genes[4])) - 1) // 2
-            # Lamarcian: get actual upper layer cells count
+            # Gene 6 (AW): fan-in -- Lamarckian: count actual upstream connections
+            # Like how synaptic normalization depends on actual input count
             if cells_array is not None:
                 upper = self.get_upper_layer_cells(cells_array, self.reach)
                 if len(upper) > 0:
@@ -100,43 +156,88 @@ class Cell:
                     self.genes[6] = Avg_Weights_Cell
             else:
                 self.genes[6] = Avg_Weights_Cell
+            # Gene 7 (CD): charge delta -- activity-dependent survival signal
             self.genes[7] = np.random.uniform(0.000001, 0.01)
+            # Gene 8 (WD): weight decay -- synaptic protein turnover rate
             self.genes[8] = np.random.uniform(1e-6, 1e-4)
+            # Gene 9 (LR): learning rate -- synaptic plasticity speed
+            # Like hippocampal (high) vs cortical (low) plasticity
+            self.genes[9] = np.random.uniform(0.001, 0.1)
+            # Gene 10 (GT): gradient threshold -- survival signal sensitivity
+            # Like neurotrophic factor receptor density
+            self.genes[10] = np.random.uniform(1e-8, 1e-4)
+            # Gene 11 (AS): activation slope -- neuron response curve
+            # From near-ReLU (0.01, sharp cutoff) to very leaky (0.5, gradual)
+            self.genes[11] = np.random.uniform(0.01, 0.5)
 
         self.color_genes()
 
     def initialize_network_proteins(self):
+        """Initialize the 5 proteins from the cell's genes.
+
+        Proteins are the dynamic state -- they change every training step.
+        Genes set the structural constraints; proteins do the work.
+        """
         epsilon = 1e-8
+        # Protein 1: charge -- the cell's activation signal (like membrane potential)
         self.charge = 0
+        # Protein 2: gradient -- most recent learning signal
         self.gradient = 0
+        # Protein 3: error -- backprop error signal (like retrograde signaling)
         self.error = epsilon
+        # Derived from gene 4: reach = how far the dendrites extend
         self.reach = (int(np.sqrt(self.genes[4])) - 1) // 2
+        # Protein 4: weights -- synaptic strengths, stored in THIS cell's dendrites
+        # Size determined by gene 4 (WG), scaling by gene 6 (AW / fan-in)
         self.weights = np.clip(
             np.random.randn(int(self.genes[4])) / (np.sqrt(self.genes[6]) + 1e-8),
             -0.8, 0.8
         )
+        # Protein 5: bias -- offset to activation (like resting potential)
+        # Range determined by gene 5 (BR)
         self.bias = np.random.uniform(0, self.genes[5])
 
     def color_genes(self):
+        """Map each gene to an RGB color for visualization.
+
+        Genes 0-3 (breeding): mapped through COLORS palette
+        Genes 4-8 (original network): individual color channels
+        Genes 9-11 (new autonomy): cyan/magenta/yellow
+        Note: only genes 0-8 are shown in the 3x3 cell display grid;
+        genes 9-11 are visible via right-click inspect and telemetry.
+        """
+        # Breeding genes 0-3: use standard color palette
         self.colors = [
             tuple(max(0, min(int(gene * 255 // 15), 255)) for color_component in color)
             for gene, color in zip(self.genes[:4], COLORS)
         ]
+        # Network genes 4-8: scale to 0-255 range
         gene_4_scaled = max(0, min(int(((self.genes[4] - 9) / (81 - 9)) * 255), 255))
         gene_5_scaled = max(0, min(int(self.genes[5] * 255), 255))
         gene_6_scaled = max(0, min(int(((self.genes[6] - 5) / (30 - 5)) * 255), 255))
         gene_7_scaled = max(0, min(int(((self.genes[7] - 0.0001) / (0.01 - 0.0001)) * 255), 255))
         gene_8_scaled = max(0, min(int(((self.genes[8] - 1e-6) / (1e-4 - 1e-6)) * 255), 255))
         self.colors.extend([
-            (gene_4_scaled, 0, gene_4_scaled),
-            (0, gene_5_scaled, gene_5_scaled),
-            (gene_6_scaled, 0, 0),
-            (0, gene_7_scaled, 0),
-            (0, 0, gene_8_scaled)
+            (gene_4_scaled, 0, gene_4_scaled),     # Gene 4 WG: purple
+            (0, gene_5_scaled, gene_5_scaled),     # Gene 5 BR: cyan
+            (gene_6_scaled, 0, 0),                 # Gene 6 AW: red
+            (0, gene_7_scaled, 0),                 # Gene 7 CD: green
+            (0, 0, gene_8_scaled)                  # Gene 8 WD: blue
+        ])
+        # Autonomy genes 9-11: new color channels
+        gene_9_scaled = max(0, min(int(((self.genes[9] - 0.001) / (0.1 - 0.001)) * 255), 255))
+        gene_10_val = max(1e-8, min(self.genes[10], 1e-4))
+        gene_10_scaled = max(0, min(int(((np.log10(gene_10_val) + 8) / 4) * 255), 255))
+        gene_11_scaled = max(0, min(int(((self.genes[11] - 0.01) / (0.5 - 0.01)) * 255), 255))
+        self.colors.extend([
+            (0, gene_9_scaled, gene_9_scaled),     # Gene 9 LR: cyan
+            (gene_10_scaled, 0, gene_10_scaled),   # Gene 10 GT: magenta
+            (gene_11_scaled, gene_11_scaled, 0),   # Gene 11 AS: yellow
         ])
 
     def color_proteins(self):
-        self.protein_colors = [0] * 9
+        """Map protein values to colors for visualization (3x3 grid display)."""
+        self.protein_colors = [0] * 12
         epsilon = 1e-8
 
         bias_range = self.genes[5]
@@ -166,13 +267,21 @@ class Cell:
 
         self.protein_colors[3] = (0, 0, 0)
         self.protein_colors[5] = (0, 0, 0)
+        # Genes 9-11 don't have separate protein colors (they ARE gene parameters)
+        self.protein_colors[9] = (0, 0, 0)
+        self.protein_colors[10] = (0, 0, 0)
+        self.protein_colors[11] = (0, 0, 0)
 
     def __setstate__(self, state):
-        """Restore from pickle with backward compatibility."""
+        """Restore from pickle with backward compatibility.
+
+        Handles old pickles with 9 genes by extending to 12 with sensible defaults.
+        """
         self.__dict__.update(state)
 
+        # Very old pickles: may have fewer than 9 genes
         if not hasattr(self, 'genes') or len(self.genes) < 9:
-            self.genes = [0] * 9
+            self.genes = [0] * 12
             if not hasattr(self.genes[3], '__int__'):
                 self.initalize_breeding_genes()
             if not hasattr(self.genes[4], '__int__'):
@@ -189,6 +298,28 @@ class Cell:
                 self.genes[7] = Cell._config.charge_delta if Cell._config else 0.001
             if not hasattr(self.genes[8], '__float__'):
                 self.genes[8] = Cell._config.weight_decay if Cell._config else 1e-6
+
+        # Migrate 9-gene cells to 12-gene cells (added genes 9=LR, 10=GT, 11=AS)
+        if len(self.genes) < 12:
+            cfg = Cell._config
+            while len(self.genes) < 12:
+                idx = len(self.genes)
+                if idx == 9:
+                    self.genes.append(cfg.learning_rate if cfg else 0.01)        # LR
+                elif idx == 10:
+                    self.genes.append(cfg.gradient_threshold if cfg else 1e-7)   # GT
+                elif idx == 11:
+                    self.genes.append(getattr(cfg, 'activation_slope', 0.1) if cfg else 0.1)  # AS
+                else:
+                    self.genes.append(0)
+
+        # Pad colors / protein_colors arrays to match gene count
+        if hasattr(self, 'colors') and len(self.colors) < 12:
+            while len(self.colors) < 12:
+                self.colors.append((0, 0, 0))
+        if hasattr(self, 'protein_colors') and len(self.protein_colors) < 12:
+            while len(self.protein_colors) < 12:
+                self.protein_colors.append((0, 0, 0))
 
         if not hasattr(self, 'reach'):
             self.reach = (int(np.sqrt(self.genes[4])) - 1) // 2
@@ -225,6 +356,10 @@ class Cell:
             self.color_proteins()
 
     # ---- Forward pass: weights are in THIS cell's dendrites ----
+    # Unlike traditional NNs where weights live in layer-to-layer matrices,
+    # here each cell OWNS its weights in self.weights (a flat 1D array).
+    # Forward: charge = sum(upstream_cell.charge * my_weight[index])
+    # Weight index: (dx + reach) * matrix_width + (dy + reach)
 
     def compute_total_charge(self, upper_layer_cells, reach):
         cfg = Cell._config
@@ -264,12 +399,25 @@ class Cell:
         self.charge = np.clip(charge, -10, 10)
 
     # ---- Activation functions ----
+    # Gene 11 (AS) controls the negative-region slope of leaky ReLU.
+    # Low slope (0.01) = sharp cutoff, like a classic ReLU neuron.
+    # High slope (0.5) = very leaky, gradual response -- more signal passes through.
+    # In biology, different neuron types have different response curves:
+    # excitatory pyramidal cells vs inhibitory interneurons, for example.
 
     def relu(self, x):
-        return np.maximum(0, x)
+        """Leaky ReLU activation. Negative slope from gene 11 (activation slope)."""
+        cfg = Cell._config
+        slope = self.genes[11] if (cfg and cfg.autonomous_network_genes) else (
+            cfg.activation_slope if cfg else 0.1)
+        return np.where(x > 0, x, slope * x)
 
     def relu_derivative(self, x):
-        return np.where(x > 0, 1.0, 0.1)  # Leaky ReLU derivative
+        """Leaky ReLU derivative. Negative slope from gene 11 (activation slope)."""
+        cfg = Cell._config
+        slope = self.genes[11] if (cfg and cfg.autonomous_network_genes) else (
+            cfg.activation_slope if cfg else 0.1)
+        return np.where(x > 0, 1.0, slope)
 
     # ---- Neighbor lookups ----
 
@@ -316,8 +464,10 @@ class Cell:
         return layer_below_cells
 
     # ---- Backpropagation: error traces back through dendrite weights ----
-    # NOTE: reversed_index = len(weights) - 1 - weight_index is mathematically
-    # equivalent to indexing at (-dx, -dy). DO NOT CHANGE THIS.
+    # Error propagates BACKWARD through the same dendritic connections.
+    # The reversed weight index maps (dx,dy) to (-dx,-dy) -- mathematically
+    # equivalent to standard backprop through a transposed weight matrix.
+    # NOTE: reversed_index = len(weights) - 1 - weight_index. DO NOT CHANGE THIS.
 
     def compute_error_signal(self, desired_output=None, connected_cells=None, reach=None):
         cfg = Cell._config
@@ -352,13 +502,20 @@ class Cell:
             self.error = epsilon
 
     def update_weights_and_bias(self, connected_cells, learning_rate, reach, weight_decay):
+        """Update this cell's dendritic weights and bias via gradient descent.
+
+        In autonomous mode, learning_rate and weight_decay come from the cell's
+        own genes (9 and 8), not from the global config.  This lets each cell
+        evolve its own plasticity rate and regularization strength.
+        """
         cfg = Cell._config
         gradient_clip_range = cfg.gradient_clip_range if cfg else 1
         if cfg and cfg.autonomous_network_genes:
             reach = self.reach
             NUMBER_OF_WEIGHTS = self.genes[4]
             WEIGHT_MATRIX = int(np.sqrt(NUMBER_OF_WEIGHTS))
-            weight_decay = self.genes[8]
+            weight_decay = self.genes[8]       # Gene 8: per-cell L2 decay
+            learning_rate = self.genes[9]      # Gene 9: per-cell learning rate
         else:
             WEIGHT_MATRIX = 2 * reach + 1
 
@@ -399,9 +556,18 @@ class Cell:
         self.charge = new_charge
 
     def update_gradient_importance(self, new_gradient):
+        """Track gradient magnitude to decide if this cell is learning.
+
+        Gene 10 (GT) controls the survival threshold: cells with average gradient
+        above this threshold are marked as "significantly learning" and protected
+        from gradient-based pruning.  In autonomous mode, each cell sets its own
+        threshold -- like neurotrophic factor receptor density.
+        """
         cfg = Cell._config
         how_much = cfg.how_much_training_data if cfg else 20
-        grad_threshold = cfg.gradient_threshold if cfg else 1e-7
+        # Gene 10: per-cell gradient threshold (survival sensitivity)
+        grad_threshold = self.genes[10] if (cfg and cfg.autonomous_network_genes) else (
+            cfg.gradient_threshold if cfg else 1e-7)
         self.gradient_history.append(abs(new_gradient))
         if len(self.gradient_history) > how_much:
             self.gradient_history.pop(0)
@@ -478,9 +644,17 @@ class Cell:
         self.update_charge(self.charge, "forward")
 
     def backward(self, cells_array, learning_rate=None, max_reach_below=None):
-        """Self-contained backward pass for this cell."""
+        """Self-contained backward pass for this cell.
+
+        In autonomous mode, learning rate (gene 9), weight decay (gene 8),
+        and reach (gene 4) all come from the cell's own genes.
+        """
         cfg = Cell._config
-        lr = learning_rate or cfg.learning_rate
+        # Gene 9 (LR): per-cell learning rate in autonomous mode
+        if cfg and cfg.autonomous_network_genes:
+            lr = self.genes[9]
+        else:
+            lr = learning_rate or cfg.learning_rate
         reach = self.reach if (cfg and cfg.autonomous_network_genes) else cfg.length_of_dendrite
         wd = self.genes[8] if (cfg and cfg.autonomous_network_genes) else cfg.weight_decay
 
@@ -571,12 +745,19 @@ class Cell:
         significant_charge_change_reverse = f'{self.significant_charge_change_reverse}'
         gradient_average = f'{self.avg_gradient_magnitude:.4f}'
         significant_gradient_change = f'{self.significant_gradient_change}'
+        # Handle old cells that might have only 9 genes
+        lr_str = f", LR={self.genes[9]:.4f}" if len(self.genes) > 9 else ""
+        gt_str = f", GT={self.genes[10]:.2e}" if len(self.genes) > 10 else ""
+        as_str = f", AS={self.genes[11]:.2f}" if len(self.genes) > 11 else ""
         return (
             f"Neuron: layer={self.layer} x={self.x} y={self.y}\n"
-            f"Genes:\n"
-            f"  OT={self.genes[0]}, IT={self.genes[1]}, BT={self.genes[2]}, MR={self.genes[3]},\n"
+            f"Genes (breeding):\n"
+            f"  OT={self.genes[0]}, IT={self.genes[1]}, BT={self.genes[2]}, MR={self.genes[3]}\n"
+            f"Genes (network):\n"
             f"  WG={self.genes[4]}, BR={self.genes[5]}, AW={self.genes[6]}, CD={self.genes[7]}, WD={self.genes[8]}\n"
-            f"charge={charge}, error={error}, bias={bias}, gradient={gradient}\n"
+            f"  {lr_str.lstrip(', ')}{gt_str}{as_str}\n"
+            f"Proteins:\n"
+            f"  charge={charge}, error={error}, bias={bias}, gradient={gradient}\n"
             f"max_charge_diff_forward={max_charge_diff_forward}, significant_charge_change_forward={significant_charge_change_forward}\n"
             f"max_charge_diff_reverse={max_charge_diff_reverse}, significant_charge_change_reverse={significant_charge_change_reverse}\n"
             f"gradient_average={gradient_average}, significant_gradient_change={significant_gradient_change}\n"

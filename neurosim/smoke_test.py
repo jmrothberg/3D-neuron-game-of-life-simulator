@@ -48,7 +48,8 @@ class _SimpleCell:
         self.charge = 0.5
         self.error = 0.001
         self.bias = 0.01
-        self.genes = [5, 3, 4, 10, 9, 0.01, 5, 0.001, 1e-6]
+        #             OT IT BT  MR  WG  BR    AW  CD     WD    LR    GT    AS
+        self.genes = [5, 3, 4, 10, 9, 0.01, 5, 0.001, 1e-6, 0.01, 1e-7, 0.1]
 
 
 def test_pickle_roundtrip():

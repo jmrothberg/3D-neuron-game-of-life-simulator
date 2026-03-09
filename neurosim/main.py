@@ -218,6 +218,7 @@ def main():
                     config.learning_rate = do_get_user_input_float(f"Learning rate ({config.learning_rate:.4f}): ", config.learning_rate)
                     config.charge_delta = do_get_user_input_float(f"Charge delta ({config.charge_delta:.3f}): ", config.charge_delta)
                     config.gradient_threshold = do_get_user_input_float(f"Gradient threshold ({config.gradient_threshold:.3f}): ", config.gradient_threshold)
+                    config.activation_slope = do_get_user_input_float(f"Activation slope ({config.activation_slope:.3f}): ", config.activation_slope)
 
                     new_wm = 2 * config.length_of_dendrite + 1
                     new_now = new_wm * new_wm

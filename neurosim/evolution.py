@@ -63,7 +63,8 @@ def update_cells(state, config):
                     potential_parents = alive_neighbors
                     if len(potential_parents) >= 2:
                         parent1, parent2 = random.sample(potential_parents, 2)
-                        new_genes = [random.choice([parent1.genes[i], parent2.genes[i]]) for i in range(9)]
+                        # Crossover: each gene randomly inherited from one parent
+                        new_genes = [random.choice([parent1.genes[i], parent2.genes[i]]) for i in range(len(parent1.genes))]
                     elif potential_parents:
                         parent1 = potential_parents[0]
                         new_genes = parent1.genes
