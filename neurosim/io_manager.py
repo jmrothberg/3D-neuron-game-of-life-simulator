@@ -111,7 +111,9 @@ def save_file(state, config, tag, ui_print_fn=None):
         f.write(f"Bias_Range: {config.bias_range}\n")
         f.write(f"Weight Range based on estimate Avg weights/cell: {config.avg_weights_cell}\n")
         f.write(f"Weight decay: {config.weight_decay}\n")
-        f.write(f"Charge change for prunning and charge protection (delta): {config.charge_delta}\n")
+        f.write(f"Charge delta (pruning/protection threshold): {config.charge_delta}\n")
+        f.write(f"Gradient threshold: {config.gradient_threshold}\n")
+        f.write(f"Activation slope (leaky ReLU): {config.activation_slope}\n")
         f.write(f"learning_rate: {config.learning_rate}\n")
         f.write(f"how_much_training_data: {config.how_much_training_data}\n")
         f.write(f"start_index: {config.start_index}\n")
@@ -212,7 +214,7 @@ def load_file(state, config, screen, growthsurface, bottom_caption_surface, font
                     if icon_x <= mouse_x < icon_x + 252 * cell_size and icon_y <= mouse_y < icon_y + 252 * cell_size:
                         selection = i + page * 16
                         if selection < len(file_list):
-                            file_path = os.path.join(file_dir, file_list[selection - 1])
+                            file_path = os.path.join(file_dir, file_list[selection])
                             try:
                                 with open(file_path, 'rb') as f:
                                     state.cells = CompatUnpickler(f).load()

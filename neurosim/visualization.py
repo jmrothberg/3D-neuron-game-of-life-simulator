@@ -72,6 +72,7 @@ def update_phenotype_cell_types(cells, config):
     for layer in range(1, config.num_layers - 1):
         for (x, y) in np.ndindex(cells.shape[:2]):
             if cells[x, y, layer] is not None:
+                total_cells += 1
                 if not all(weight in [0, epsilon] for weight in cells[x, y, layer].weights):
                     cell = cells[x, y, layer]
                     all_charges.append(cell.charge)
@@ -83,8 +84,8 @@ def update_phenotype_cell_types(cells, config):
                     all_max_rev.append(cell.max_charge_diff_reverse)
                     count_pos += 1
 
-    if count_pos > 0:
-        return (0, 0, {})
+    if count_pos == 0:
+        return (0, total_cells, {})
 
     charge_mean, charge_std = (np.mean(all_charges), np.std(all_charges)) if all_charges else (0, 0)
     bias_mean, bias_std = (np.mean(all_biases), np.std(all_biases)) if all_biases else (0, 0)

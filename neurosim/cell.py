@@ -773,22 +773,23 @@ class Cell:
         significant_charge_change_reverse = f'{self.significant_charge_change_reverse}'
         gradient_average = f'{self.avg_gradient_magnitude:.4f}'
         significant_gradient_change = f'{self.significant_gradient_change}'
-        # Handle old cells that might have only 9 genes
-        lr_str = f", LR={self.genes[9]:.4f}" if len(self.genes) > 9 else ""
-        gt_str = f", GT={self.genes[10]:.2e}" if len(self.genes) > 10 else ""
-        as_str = f", AS={self.genes[11]:.2f}" if len(self.genes) > 11 else ""
+        # Genes 9-11 line (always present in 12-gene cells)
+        if len(self.genes) >= 12:
+            genes_9_11 = f"  LR={self.genes[9]:.4f}, GT={self.genes[10]:.2e}, AS={self.genes[11]:.2f}\n"
+        else:
+            genes_9_11 = ""
         return (
             f"Neuron: layer={self.layer} x={self.x} y={self.y}\n"
             f"Genes (breeding):\n"
             f"  OT={self.genes[0]}, IT={self.genes[1]}, BT={self.genes[2]}, MR={self.genes[3]}\n"
             f"Genes (network):\n"
-            f"  WG={self.genes[4]}, BR={self.genes[5]}, AW={self.genes[6]}, CD={self.genes[7]}, WD={self.genes[8]}\n"
-            f"  {lr_str.lstrip(', ')}{gt_str}{as_str}\n"
+            f"  WG={self.genes[4]}, BR={self.genes[5]}, AW={self.genes[6]}, CD={self.genes[7]:.4e}, WD={self.genes[8]:.4e}\n"
+            f"{genes_9_11}"
             f"Proteins:\n"
             f"  charge={charge}, error={error}, bias={bias}, gradient={gradient}\n"
-            f"max_charge_diff_forward={max_charge_diff_forward}, significant_charge_change_forward={significant_charge_change_forward}\n"
-            f"max_charge_diff_reverse={max_charge_diff_reverse}, significant_charge_change_reverse={significant_charge_change_reverse}\n"
-            f"gradient_average={gradient_average}, significant_gradient_change={significant_gradient_change}\n"
-            f"reach={reach}\n"
+            f"  max_charge_fwd={max_charge_diff_forward} ({significant_charge_change_forward})\n"
+            f"  max_charge_rev={max_charge_diff_reverse} ({significant_charge_change_reverse})\n"
+            f"  gradient_avg={gradient_average} ({significant_gradient_change})\n"
+            f"  reach={reach}\n"
             f"weights={weights_str}"
         )

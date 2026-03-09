@@ -50,16 +50,20 @@ class SimConfig:
     upper_allele_range: int = 15
     autonomous_network_genes: bool = False
 
-    # Training hyperparameters
-    learning_rate: float = 0.01
-    bias_range: float = 0.01
-    avg_weights_cell: int = 5
-    weight_decay: float = 1e-6
-    charge_delta: float = 0.001
-    gradient_threshold: float = 0.0000001
-    gradient_clip_range: int = 1
-    weight_change_threshold: float = 0.005
-    activation_slope: float = 0.1        # Leaky ReLU negative slope (gene 11 default)
+    # Training hyperparameters (these are global defaults; in autonomous mode,
+    # genes 4-11 override per-cell: WG, BR, AW, CD, WD, LR, GT, AS)
+    learning_rate: float = 0.01          # Gene 9 default (LR: synaptic plasticity speed)
+    bias_range: float = 0.01             # Gene 5 default (BR: initial bias magnitude)
+    avg_weights_cell: int = 5            # Gene 6 default (AW: fan-in for He init)
+    weight_decay: float = 1e-6           # Gene 8 default (WD: L2 regularization)
+    charge_delta: float = 0.001          # Gene 7 default (CD: activity significance threshold)
+    gradient_threshold: float = 0.0000001  # Gene 10 default (GT: pruning survival sensitivity)
+    gradient_clip_range: int = 1         # Max gradient magnitude (not yet a gene)
+    weight_change_threshold: float = 0.005  # Not yet a gene
+    activation_slope: float = 0.1        # Gene 11 default (AS: leaky ReLU negative slope)
+    # FUTURE AUTONOMY CANDIDATES: gradient_clip_range, weight_change_threshold,
+    # charge clipping range (hardcoded ±10), prune_logic (AND/OR),
+    # charge_change_protection, memory window (how_much_training_data)
 
     # Data
     how_much_training_data: int = 20

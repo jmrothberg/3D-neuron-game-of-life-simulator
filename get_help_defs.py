@@ -29,32 +29,27 @@ def get_defs():
     parents ONE of whom could give it the 
     BT = 3 allele.
 
-    Mutation Rate (MR): This gene 
-    determines the chance of a cell's 
-    genes mutating when it reproduces.
-    It is a fraction of a user selected 
-    denominator, a higher value meaning a 
-    higher chance of mutation.
-    For example, if MR = 1, there is a 1% 
-    chance (If rate was selected per 100) 
-    each gene can mutate at the time a new 
-    cell is born.
+    Mutation Rate (MR): This gene
+    determines the chance of a cell's
+    genes mutating. Two contexts:
+    - At BIRTH: chance = MR / 1000
+      (germline mutation during crossover)
+    - During LIFE: chance = MR / 100000
+      (somatic mutation each evolution tick)
 
-    A "germ-line" mutation in the BT gene 
-    gives a new cell the chance to be BORN 
-    even if neither parents had a BT gene 
-    value allowing it to be born in that 
+    A "germ-line" mutation in the BT gene
+    gives a new cell the chance to be BORN
+    even if neither parent had a BT gene
+    value allowing it to be born in that
     position.
-    Not until the next cycle will a cell 
-    be checked for OT & IT to determine 
-    cycle. So many cells are born that die 
-    in the next cycle.
+    Not until the next cycle will a cell
+    be checked for OT & IT. So many cells
+    are born that die in the next cycle.
 
-    Mutation (somatic) here means that any 
-    gene's value has chance to randomly 
-    change to any value between 0 and 7 
-    (or whatever range is selected by the 
-    user).
+    Somatic mutation: any gene randomly
+    changes -- breeding genes to a new
+    allele in the configured range, network
+    genes re-randomized per their type.
     """
 
     jmr_defs2 = """
@@ -100,35 +95,27 @@ def get_defs():
     """
 
     conways_defs = """
-    The original Conway's Game of Life has 
-    a fixed set of rules that apply to all 
-    cells equally:
+    Original Conway's Game of Life has
+    fixed rules for all cells:
 
-    Overcrowding Tolerance (OT): Any live 
-    cell with more than three (3) live 
-    neighbors dies, as if by overcrowding.
-    Isolation Tolerance (IT)   : Any live 
-    cell with fewer than two (2) live 
-    neighbors dies, as if by isolation/
-    lonelyness).
+    Overcrowding (OT=3): Any cell with
+    more than 3 neighbors dies.
+    Isolation (IT=2): Any cell with
+    fewer than 2 neighbors dies.
+    Birth (BT=3): Empty space with
+    exactly 3 neighbors spawns a cell.
 
-    Birth Threshold (BT): Any cell 
-    location with exactly three (3) live 
-    neighbors becomes a live cell, as if 
-    by reproduction (a new cell is born).
-    There is no concept of a Gene or 
-    Mutation Rate (MR) in the original 
-    game, as rules are static and don't 
-    change."
-                                
-    Overcrowding Tolerance (OT): .genes[0]  
-    neighbors <= 3 OT 
-    Isolation Tolerance (IT)   : .genes[1]  
-    neighbors >= 2 IT 
-    Birth Threshold (BT)       : .genes[2]  
-    neighbors == 3 BT
-        
-    OT 3 >=  neighbors >=  2 IT
+    In Conway's: no genes, no mutation,
+    no evolution. Rules are static.
+
+    JMR's version makes OT, IT, BT into
+    per-cell GENES that are inherited:
+    OT: .genes[0]  neighbors <= OT
+    IT: .genes[1]  neighbors >= IT
+    BT: .genes[2]  neighbors == BT
+
+    Survival: IT <= neighbors <= OT
+    (with OT > IT enforced)
     """
 
     how_network_works = """
@@ -161,97 +148,78 @@ def get_defs():
     """
 
     forward_pass = """
-    Forward pass is the process of moving 
-    the input data through the network 
-    layer by layer:
+    Forward pass moves input data through
+    the network layer by layer. Each cell
+    computes:
+      charge = leaky_ReLU(bias +
+        sum(upstream_charge * weight))
+
     Layer N-2:       Layer N-1:       Layer N:
 
     B11 B12 B13      C11 C12 C13      W11 W12 W13
     B21 B22 B23  --> C21 C22 C23  --> W21 W22 W23
     B31 B32 B33      C31 C32 C33      W31 W32 W33
 
-    1. Each cell in Layer N-2 (Bij) 
-    calculates its charge based on its 
-    inputs and passes it to the 
-    corresponding cells in Layer N-1 (Cij) 
-    using the weights stored in Cij.
+    1. Each cell gathers charges from
+    upstream cells within its dendrite
+    reach (gene 4 controls reach size).
 
-    2. Each cell in Layer N-1 (Cij) 
-    calculates its charge based on the 
-    received charges and its weights, then 
-    passes it to the corresponding cells 
-    in Layer N (Wij) using the weights 
-    stored in Wij.
+    2. The cell computes a weighted sum
+    of upstream charges using its own
+    weights, adds its bias, then applies
+    leaky ReLU activation (gene 11
+    controls the negative slope).
 
-    3. Each cell in Layer N (Wij) 
-    calculates its final charge based on 
-    the received charges and its weights.
+    3. The resulting charge is clipped
+    to [-10, 10] and stored as the
+    cell's new charge value.
     """
 
     how_backprop_works = """
-    The weights of the current cell are 
-    updated based on the error of the 
-    current cell and the charge of the 
-    cells in the layer above. 
+    The weights of the current cell are
+    updated based on the error of the
+    current cell and the charge of the
+    cells in the layer above.
 
-    The `get_upper_layer_cells` function 
-    is used in the 
-    `update_weights_and_bias` function to 
-    get the cells from the layer above the 
-    current cell. These cells are used to 
-    calculate the gradient for updating 
-    the weights of the current cell.
+    `get_upper_layer_cells` gathers the
+    upstream cells within dendrite reach.
+    These are passed to
+    `update_weights_and_bias` to compute
+    gradient = error * upstream_charge
+    and update each weight:
+      w -= lr * gradient + decay * w
 
-    The `get_layer_below_cells` function 
-    is used in the 
-    `compute_error_signal_other_layers` 
-    function to get the cells from the 
-    layer below the current cell. These 
-    cells are used to calculate the error 
-    signal for the current cell."""
+    `get_layer_below_cells` gathers the
+    downstream cells. These are passed to
+    `compute_error_signal` to propagate
+    error backward through the reversed
+    weight index."""
 
     how_backprop_works2 = """
-
-    Here is a simple text-based figure to 
-    illustrate the concept:
+    Backprop figure:
     Layer N-1 (Above) Layer N (Current) Layer N+1 (Below)
 
     Cell A          Cell X                 Cell 1
     Cell B          Cell Y                 Cell 2
     Cell C          Cell Z                 Cell 3
 
-    In this figure, Cells A, B, and C are 
-    in the layer above the current layer. 
-    Cells X, Y, and Z are in the current 
-    layer. Cells 1, 2, and 3 are in the 
-    layer below the current layer.
+    Cells A, B, C are in the layer above.
+    Cells X, Y, Z are in the current layer.
+    Cells 1, 2, 3 are in the layer below.
 
-    When updating the weights of Cell X 
-    during backpropagation, we use the 
-    charges of Cells A, B, and C (from the 
-    layer above) and the error of Cell X. 
-    This is done in the 
-    `update_weights_and_bias` function.
+    WEIGHT UPDATE (update_weights_and_bias):
+    For Cell X, we use charges of A, B, C
+    (layer above) and the error of Cell X.
+    weight_index = (dx+reach)*matrix+(dy+reach)
 
-    When calculating the error signal for 
-    Cell X, we use the errors and weights 
-    of Cells 1, 2, and 3 (from the layer 
-    below) and the derivative of the 
-    activation function of Cell X. This is 
-    done in the 
-    `compute_error_signal_other_layers` 
-    function.
-
-    Regarding the index, (`weight_index`) 
-    in the `update_weights_and_bias` 
-    function. The index is calculated 
-    based on the relative position (dx, 
-    dy) of the cell in the layer above to 
-    the current cell. The `reversed_index` 
-    is used in the 
-    `compute_error_signal_other_layers` 
-    function to access the weights of the 
-    cells in the layer below.
+    ERROR SIGNAL (compute_error_signal):
+    For Cell X, we use errors and weights
+    of Cells 1, 2, 3 (layer below) and
+    the leaky ReLU derivative of Cell X.
+    reversed_index = len(weights)-1-weight_index
+    This maps (dx,dy) to (-dx,-dy), which
+    is equivalent to transposing the weight
+    matrix in standard backprop.
     """
 
     controls = """
