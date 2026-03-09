@@ -102,7 +102,7 @@ def main():
         """3D backprop visualization callback."""
         render_3d_backprop(state, config, current_layer, current_pos)
         pygame.display.flip()
-        pygame.time.wait(50)
+        pygame.time.wait(10)
 
     # ---- Simulation loop ----
     start_time = time.time()
@@ -436,6 +436,7 @@ def main():
             try:
                 run_training(state, config, draw_fn=do_draw, render_backprop_fn=do_render_backprop)
                 print(f"Cycle {state.training_cycles}: correct={state.bingo_count}/{config.how_much_training_data} loss={state.running_avg_loss:.4f} max={state.max_bingo_count}")
+                state._3d_dirty = True
             except Exception as e:
                 import traceback
                 print(f"Training error: {e}")

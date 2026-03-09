@@ -71,6 +71,9 @@ class SimState:
     _max_reach_per_layer: dict = field(default_factory=dict)
     _cache_valid: bool = False
 
+    # 3D visualization cache dirty flag
+    _3d_dirty: bool = True
+
     def __post_init__(self):
         if self.cells is None:
             self.cells = np.full((WIDTH, HEIGHT, ARRAY_LAYERS), None, dtype=object)
@@ -80,6 +83,7 @@ class SimState:
     def invalidate_neighbor_cache(self):
         self._max_reach_per_layer.clear()
         self._cache_valid = False
+        self._3d_dirty = True
 
     def get_max_reach_for_layer(self, layer):
         """Cached max reach for a layer. Invalidated on birth/death."""
