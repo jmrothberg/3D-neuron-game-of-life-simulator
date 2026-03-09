@@ -12,7 +12,8 @@ except ImportError:
 from neurosim.config import WINDOW_WIDTH, WINDOW_HEIGHT, WIDTH, HEIGHT
 
 # ---------------------------------------------------------------------------
-# Module-level vertex cache — rebuilt only when state._3d_dirty is True
+# Module-level vertex cache — geometry rebuilt only when state._3d_dirty is True
+# Colors updated every frame (cheap: just rewrite the color array from live charges)
 # ---------------------------------------------------------------------------
 _neuron_verts = None       # [N, 3] float32
 _neuron_colors = None      # [N, 3] float32
@@ -23,6 +24,9 @@ _hidden_range = (0, 0)
 _output_range = (0, 0)
 _cell_count = 0
 _conn_count = 0
+
+# Parallel list of (cell_ref, layer) for each neuron — used to refresh colors each frame
+_neuron_cell_refs = []     # [(cell, layer), ...] same order as _neuron_verts
 
 # HUD texture cache
 _hud_texture_id = None
@@ -85,7 +89,7 @@ def rebuild_3d_cache(state, config):
     line endpoints/colors.  Called once per dirty flag, NOT every frame."""
     global _neuron_verts, _neuron_colors, _conn_verts, _conn_colors
     global _input_range, _hidden_range, _output_range
-    global _cell_count, _conn_count
+    global _cell_count, _conn_count, _neuron_cell_refs
 
     cells = state.cells
     nl = config.num_layers
@@ -115,12 +119,14 @@ def rebuild_3d_cache(state, config):
         _hidden_range = (0, 0)
         _output_range = (0, 0)
         _conn_count = 0
+        _neuron_cell_refs = []
         state._3d_dirty = False
         return
 
     # Allocate neuron arrays — sorted: input, hidden, output
     nv = np.empty((total_neurons, 3), dtype=np.float32)
     nc = np.empty((total_neurons, 3), dtype=np.float32)
+    cell_refs = [None] * total_neurons  # parallel array: (cell, layer)
 
     # Estimate connection count (will trim later)
     conn_list_v = []
@@ -158,6 +164,7 @@ def rebuild_3d_cache(state, config):
 
                 nv[idx] = (px, py, z)
                 nc[idx] = (r, g, b)
+                cell_refs[idx] = (cell, layer)
 
                 # --- Connections (hidden + output layers only) ---
                 if layer == 0:
@@ -206,6 +213,7 @@ def rebuild_3d_cache(state, config):
 
     _neuron_verts = nv
     _neuron_colors = nc
+    _neuron_cell_refs = cell_refs
     _input_range = (0, n_input)
     _hidden_range = (n_input, n_hidden)
     _output_range = (n_input + n_hidden, n_output)
@@ -220,6 +228,23 @@ def rebuild_3d_cache(state, config):
         _conn_count = 0
 
     state._3d_dirty = False
+
+
+def _refresh_neuron_colors(config):
+    """Update neuron colors from live cell charges — called every frame.
+
+    This is cheap: just iterate the cell_refs list and rewrite the color array.
+    No geometry rebuild, no connection rebuild.  Keeps 3D display dynamic like 2D.
+    """
+    global _neuron_colors
+    if _neuron_colors is None or not _neuron_cell_refs:
+        return
+    nl = config.num_layers
+    for i, ref in enumerate(_neuron_cell_refs):
+        if ref is None:
+            continue
+        cell, layer = ref
+        _neuron_colors[i] = _layer_color(layer, nl, cell.charge)
 
 
 # ---------------------------------------------------------------------------
@@ -430,14 +455,18 @@ def setup_3d_view():
 def render_3d_network(state, config):
     """Render the full network using cached vertex arrays.
 
-    Only rebuilds geometry when state._3d_dirty is True.
+    Geometry rebuilt only when state._3d_dirty is True.
+    Colors refreshed every frame from live cell charges (keeps it dynamic like 2D).
     """
     if not HAS_OPENGL:
         return
 
-    # Rebuild cache if needed
+    # Rebuild geometry + connections if network structure changed
     if state._3d_dirty or _neuron_verts is None:
         rebuild_3d_cache(state, config)
+
+    # Refresh colors every frame from live cell charges
+    _refresh_neuron_colors(config)
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
@@ -507,6 +536,9 @@ def render_3d_backprop(state, config, current_layer, current_pos):
     # Rebuild cache if needed (just once, not per cell)
     if state._3d_dirty or _neuron_verts is None:
         rebuild_3d_cache(state, config)
+
+    # Refresh colors from live charges
+    _refresh_neuron_colors(config)
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
