@@ -449,7 +449,9 @@ python3 mnist_to_neurosim_web_json.py --count 500 --no-verify-ssl -o mnist_train
 
 Then in the browser: **M** → **J** → select that file. Options: `--offset`, `--count` (training slice), `--cache-dir`.
 
-**Parity notes:** floating-point and `Math.random` sequences differ from NumPy/Python; 3D backprop mode draws a lighter overlay than the desktop OpenGL dim+highlight path; MNIST directory pickles are not loaded in the browser (use synthetic or exported JSON); quit uses the browser tab close control instead of a blocking stdin confirm.
+**Feature coverage vs `neurosim/main.py` (desktop):** The web port maps the same keyboard workflow where possible: **Space, U, P, O, =, C, D, N, I, E, X, S, L, M, F, R, B, T, A, W, G, V, Q, 3, 4**, left-click paint, right-click / Ctrl+click inspect, training loop + prediction strip, 3D orbit/zoom, and autosave when **Max correct** reaches a full batch (desktop writes pickle **`-perfect`**; browser downloads JSON with **`-perfect`** in the filename). **H** cycles help only in 2D, like pygame. Extra: **?** quick-start scroll.
+
+**Known gaps / differences:** Pickle **saved_states/** and per-run **.png** icons are desktop-only; **L** loads **JSON** you export with **S** (or share a state file), not the pygame thumbnail browser. MNIST in pygame reads prepared **pickle folders** on disk (**M** → **M** vs **F**); the browser uses **J** + `mnist_to_neurosim_web_json.py` (or **M** synthetic). **`state.timing`** evolution prints are not wired to UI. **Parity notes:** float RNG differs from NumPy; 3D backprop highlight differs from OpenGL; tab close replaces pygame quit + stdin **y/n**.
 
 ## Author
 

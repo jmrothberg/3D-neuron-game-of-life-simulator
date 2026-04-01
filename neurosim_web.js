@@ -1417,6 +1417,19 @@
       if (!state.show_3d_view) doDraw2d();
       else state._3d_dirty = true;
     }
+    /** tag e.g. '' or '-perfect' — matches desktop save_file(..., tag) naming hint */
+    function downloadSimulationJson(tag) {
+      const payload = { version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles };
+      const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const ts = Date.now();
+      a.download = tag
+        ? `neurosim_${config.num_layers}_${config.number_of_weights}_${state.bingo_count}_${config.how_much_training_data}${tag}_${ts}.json`
+        : `neurosim_${ts}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
     function doRenderBackprop(layer, pos) {
       const [x, y] = pos;
       render3dBackprop(state, config, layer, x, y);
@@ -1495,7 +1508,6 @@
         drawHelpPanel();
         return;
       }
-      if (state.show_3d_view && k.toLowerCase() === 'h') { /* allow */ }
       if (!state.show_3d_view && k.toLowerCase() === 'h') {
         state.current_index = (state.current_index + 1) % helpKeys.length;
         helpText = HELP_SCREEN[helpKeys[state.current_index]];
@@ -1636,6 +1648,7 @@
         return;
       }
       if (k.toLowerCase() === 'e') {
+        const oldNumWeights = config.number_of_weights;
         const nl = await showModal(`num_layers (4-16):`, config.num_layers);
         const ld = await showModal(`dendrite length:`, config.length_of_dendrite);
         if (nl != null) config.num_layers = clip(+nl | 0, 4, 16);
@@ -1652,11 +1665,14 @@
         config.gradient_threshold = +(await showModal('gradient_threshold:', config.gradient_threshold) ?? config.gradient_threshold);
         config.activation_slope = +(await showModal('activation_slope:', config.activation_slope) ?? config.activation_slope);
         config.updateDerived();
-        for (let z = 1; z < config.num_layers - 1; z++)
-          for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
-            const c = state.cells[x][y][z];
-            if (c) c.remapWeights(config.length_of_dendrite);
-          }
+        /* Desktop neurosim/main.py: remap only when weight count (dendrite footprint) changes. */
+        if (config.number_of_weights !== oldNumWeights) {
+          for (let z = 1; z < config.num_layers - 1; z++)
+            for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+              const c = state.cells[x][y][z];
+              if (c) c.remapWeights(config.length_of_dendrite);
+            }
+        }
         state.invalidateNeighborCache();
         uiPrint(`Updated dendrite=${config.length_of_dendrite} weights=${config.number_of_weights}`);
         return;
@@ -1684,13 +1700,7 @@
         return;
       }
       if (k.toLowerCase() === 's') {
-        const payload = { version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles };
-        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `neurosim_${Date.now()}.json`;
-        a.click();
-        URL.revokeObjectURL(a.href);
+        downloadSimulationJson('');
         state.not_saved_yet = false;
         uiPrint('Saved JSON (download started)');
         return;
@@ -1741,6 +1751,12 @@
     let startT = performance.now();
     function tick() {
       requestAnimationFrame(tick);
+      /* neurosim/main.py: autosave when a full training batch is ever classified perfectly */
+      if (state.max_bingo_count === config.how_much_training_data && state.not_saved_yet) {
+        downloadSimulationJson('-perfect');
+        state.not_saved_yet = false;
+        uiPrint('Perfect batch: auto-saved JSON (tag -perfect).');
+      }
       if (state.running) updateCells(state, config);
       if (state.training_mode) {
         const setSize = config.how_much_training_data;
