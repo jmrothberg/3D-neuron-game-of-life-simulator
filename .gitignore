@@ -59,6 +59,11 @@ wheels/
 # MNIST_*
 # Fashion_MNIST_*
 
+# mnist_to_neurosim_web_json.py download cache
+.mnist_cache/
+# Large generated training JSON for the browser (regenerate locally with -o)
+mnist_training_web.json
+
 # Temporary files
 *.tmp
 *.temp

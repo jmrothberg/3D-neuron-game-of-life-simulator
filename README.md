@@ -424,6 +424,29 @@ MNIST and Fashion-MNIST data must be preprocessed into per-image pickle files. S
 - **Fashion-MNIST:** 98/100 on similar architecture
 - Networks survive save/reload and can continue training or evolution
 
+## Browser port (single-file HTML)
+
+Regenerate the standalone page (inline script + full help text from `get_help_defs.py`) with:
+
+```bash
+python3 build_neurosim_web.py
+```
+
+Open `neurosim_web.html` in a browser (network needed once for the Three.js CDN). Saves/loads simulation state as **JSON** (not Python pickle). Training: press **M** for synthetic mini-batches or choose **J** and pick a JSON file with `samples: [{ layer0, layerLast }, ...]` (each a 28×28 grid of cell objects or nulls, same shape as the desktop tensor). Source for the inlined script is `neurosim_web.js`.
+
+**MNIST / Fashion-MNIST → web JSON** (downloads official IDX gzip URLs, stdlib only):
+
+```bash
+python3 mnist_to_neurosim_web_json.py --dataset mnist --count 500 -o mnist_training_web.json
+# Fashion-MNIST: --dataset fashion
+# If download fails with CERTIFICATE_VERIFY_FAILED:
+python3 mnist_to_neurosim_web_json.py --count 500 --no-verify-ssl -o mnist_training_web.json
+```
+
+Then in the browser: **M** → **J** → select that file. Options: `--offset`, `--count` (training slice), `--cache-dir`.
+
+**Parity notes:** floating-point and `Math.random` sequences differ from NumPy/Python; 3D backprop mode draws a lighter overlay than the desktop OpenGL dim+highlight path; MNIST directory pickles are not loaded in the browser (use synthetic or exported JSON); quit uses the browser tab close control instead of a blocking stdin confirm.
+
 ## Author
 
 Jonathan Marc Rothberg

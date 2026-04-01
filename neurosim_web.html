@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JMR Neural Game of Life (Web)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #222; color: #eee; }
+    #wrap { display: flex; flex-direction: row; height: 100vh; overflow: hidden; }
+    #mainCol { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    /* Scroll inside this wrapper so the full 1008² grid is reachable; canvas may scale down on narrow screens */
+    #canvasWrap { flex: 1; min-height: 0; overflow: auto; background: #333; }
+    #cv2d, #cv3d { display: block; background: #fff; touch-action: none; width: 100%; max-width: 1008px; height: auto; aspect-ratio: 1 / 1; }
+    #cv3d { cursor: grab; }
+    #bottom { background: #000; color: #cfc; font: 12px/1.3 monospace; padding: 4px 8px; height: 100px; overflow: hidden; position: relative; }
+    #pred { position: absolute; left: 756px; top: 0; bottom: 0; width: 240px; pointer-events: none; }
+    #side { width: 500px; flex-shrink: 0; background: #e8e8e8; color: #111; display: flex; flex-direction: column; font: 13px/1.35 monospace; padding: 0; min-height: 0; height: 100vh; box-sizing: border-box; }
+    #quickStartBar { background: #d8ecff; color: #111; border-bottom: 2px solid #69c; padding: 8px; font: 12px/1.45 system-ui, sans-serif; white-space: pre-wrap; flex-shrink: 0; max-height: 32vh; overflow-y: auto; }
+    #sidePre { margin: 0; padding: 8px; overflow: auto; flex: 1; white-space: pre-wrap; }
+    #modalMask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); align-items: center; justify-content: center; z-index: 100; }
+    #modalMask.on { display: flex; }
+    #modalBox { background: #fff; color: #111; padding: 16px; min-width: 320px; max-width: 90vw; }
+    #hud3d { position: fixed; left: 8px; bottom: 110px; background: rgba(0,0,0,0.65); color: #fff; font: 12px monospace; padding: 8px; z-index: 50; max-width: 90vw; display: none; white-space: pre-wrap; }
+    #filePick { display: none; }
+    .row { margin-top: 8px; }
+    button { margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="mainCol">
+      <div id="canvasWrap">
+        <canvas id="cv2d" width="1008" height="1008" tabindex="0" title="Click for keyboard focus. If the square looks small, scroll inside this area — mouse is mapped to the full grid."></canvas>
+        <canvas id="cv3d" width="1008" height="1008" style="display:none" tabindex="0"></canvas>
+      </div>
+      <div id="bottom">
+        <canvas id="pred" width="240" height="96"></canvas>
+        <div id="statusLines"></div>
+      </div>
+    </div>
+    <div id="side">
+      <div id="quickStartBar"></div>
+      <pre id="sidePre"></pre>
+    </div>
+  </div>
+  <div id="hud3d"></div>
+  <div id="modalMask">
+    <div id="modalBox">
+      <div id="modalPrompt"></div>
+      <input id="modalInput" type="text" style="width:100%;margin-top:8px" />
+      <div class="row">
+        <button id="modalOk">OK</button>
+        <button id="modalCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <input id="filePick" type="file" accept=".json,application/json" />
+<script>
+const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding Tolerance (OT): This gene \n    determines the maximum number of \n    neighbors a cell can have before it \n    dies due to overcrowding.\n    For example, if OT = 3, the cell will \n    die if it has more than 3 neighbors.\n\n    Isolation Tolerance (IT): This gene \n    determines the minimum number of \n    neighbors a cell needs to survive.\n    For example, if IT = 2, a cell with \n    fewer than 2 neighbors will die.\n\n    Birth Threshold (BT): This gene \n    determines the number of neighbors an \n    empty grid space needs to produce a \n    new cell. If an empty space has \n    exactly this many neighbors, a new \n    cell will be born.\n    For example, if BT = 3, a new cell \n    will be born in an empty space that \n    has exactly 3 neighbors. And inherit \n    the genes by recombination between two \n    parents ONE of whom could give it the \n    BT = 3 allele.\n\n    Mutation Rate (MR): This gene\n    determines the chance of a cell's\n    genes mutating. Two contexts:\n    - At BIRTH: chance = MR / 1000\n      (germline mutation during crossover)\n    - During LIFE: chance = MR / 100000\n      (somatic mutation each evolution tick)\n\n    A \"germ-line\" mutation in the BT gene\n    gives a new cell the chance to be BORN\n    even if neither parent had a BT gene\n    value allowing it to be born in that\n    position.\n    Not until the next cycle will a cell\n    be checked for OT & IT. So many cells\n    are born that die in the next cycle.\n\n    Somatic mutation: any gene randomly\n    changes -- breeding genes to a new\n    allele in the configured range, network\n    genes re-randomized per their type.", "jmr_defs2": "Cells inherit these genes from their\n    parent cells (random independent\n    selection of two parents if multiple\n    are available, and then independent\n    assortment of genes), with a chance of\n    (germline) mutation based on their\n    inherited Mutation Rate each cycle.\n\n    The world is made up of 3D grid of\n    potential cells. Each cell has a set\n    of genes that determine its behavior.\n    Each cell is displayed as an\n    informative 3 x 3 arrangement of\n    colored blocks.\n\n    3x3 Display:  OT      IT      BT\n                  MR      Charge  Error\n                  Bias    Weight  Gradient\n\n    -- Breeding Genes (always per-cell) --\n    Overcrowding Tolerance (OT): .genes[0]\n    neighbors <= OT (cell dies if more)\n    Isolation Tolerance (IT)   : .genes[1]\n    neighbors >= IT (cell dies if fewer)\n    Birth Threshold (BT)       : .genes[2]\n    neighbors == BT for birth\n\n    OT >= neighbors >= IT, OT > IT\n\n    -- Network Genes (per-cell when U on) --\n    Mutation Rate (MR)         : .genes[3]\n    Dendrite Size (WG)         : .genes[4]\n    Bias Range (BR)            : .genes[5]\n    Fan-In / Avg Weights (AW)  : .genes[6]\n    Charge Delta (CD)          : .genes[7]\n    Weight Decay (WD)          : .genes[8]\n    Learning Rate (LR)         : .genes[9]\n    Gradient Threshold (GT)    : .genes[10]\n    Activation Slope (AS)      : .genes[11]", "conways_defs": "Original Conway's Game of Life has\n    fixed rules for all cells:\n\n    Overcrowding (OT=3): Any cell with\n    more than 3 neighbors dies.\n    Isolation (IT=2): Any cell with\n    fewer than 2 neighbors dies.\n    Birth (BT=3): Empty space with\n    exactly 3 neighbors spawns a cell.\n\n    In Conway's: no genes, no mutation,\n    no evolution. Rules are static.\n\n    JMR's version makes OT, IT, BT into\n    per-cell GENES that are inherited:\n    OT: .genes[0]  neighbors <= OT\n    IT: .genes[1]  neighbors >= IT\n    BT: .genes[2]  neighbors == BT\n\n    Survival: IT <= neighbors <= OT\n    (with OT > IT enforced)", "how_network_works": "HOW THE NETWORK IS DIFFERENT\n\n    In a traditional NN, weights live in\n    layer-to-layer matrices owned by the\n    network. Here, weights live INSIDE\n    each cell's dendrites -- a flat 1D\n    array (self.weights) that the cell\n    owns, carries, and updates itself.\n\n    The Grid:\n    Layer 0    Layer 1..N-2   Layer N-1\n    (Input)    (Hidden)       (Desired)\n    MNIST  --> cells learn --> labels\n    pixels     & evolve       (0-9)\n\n    Training data loaded into layer 0.\n    Desired outputs loaded into layer N-1.\n    Cells in layers 1 to N-2 learn to\n    map inputs to outputs by adjusting\n    their own weights via backprop.\n\n    Each cell has its own learning rate\n    (gene 9), weight decay (gene 8), and\n    activation curve (gene 11). No global\n    optimizer -- each cell runs its own\n    gradient descent.", "forward_pass": "FORWARD PASS (one cell's view)\n\n    Cell X looks at the layer ABOVE it\n    and gathers charges from neighbors\n    within its dendrite reach:\n\n    Layer above:        This cell:\n     [A][B][C]\n     [D][E][F] ---->    Cell X\n     [G][H][I]          at (x,y)\n     3x3 reach\n     (gene 4 = 9)\n\n    Step 1: Gather upstream charges\n      (skip empty positions)\n\n    Step 2: Weighted sum + bias\n      charge = bias\n            + A.charge * w[0]\n            + B.charge * w[1]\n            + ... + I.charge * w[8]\n\n    Step 3: Leaky ReLU activation\n      if charge > 0: keep it\n      if charge < 0: charge *= slope\n        (gene 11 controls slope)\n\n    Step 4: Clip to [-10, 10], store\n\n    Weight index formula:\n      idx = (dx+reach)*matrix + (dy+reach)\n      (-1,-1)->0  (-1,0)->1  (-1,+1)->2\n      ( 0,-1)->3  ( 0,0)->4  ( 0,+1)->5\n      (+1,-1)->6  (+1,0)->7  (+1,+1)->8", "how_backprop_works": "BACKWARD PASS: 2 JOBS PER CELL\n\n    Job 1: COMPUTE ERROR SIGNAL\n    Output layer (N-2):\n      error = (my_charge - desired)\n              * ReLU_derivative(charge)\n\n    Hidden layers:\n      Look at cells BELOW (layer+1).\n      They already have their errors.\n      error = SUM(cell_below.error\n        * cell_below.weights[rev_idx])\n        * ReLU_derivative(my_charge)\n\n    Job 2: UPDATE MY WEIGHTS\n    Look at cells ABOVE (layer-1).\n    For each upstream cell:\n      gradient = my_error * upstream.charge\n      w[idx] -= lr * gradient + decay * w\n      bias   -= lr * my_error\n\n    lr = gene 9, decay = gene 8\n    (per-cell in autonomous mode)", "how_backprop_works2": "WHY reversed_index WORKS\n\n    Forward: Cell 5 (below) looks UP\n    at Cell X through weight_index:\n      idx = (dx+reach)*m + (dy+reach)\n\n    Backward: Cell X looks DOWN at\n    Cell 5 through reversed_index:\n      rev = len(w) - 1 - idx\n\n    For 3x3 weights:\n      fwd 0 <-> rev 8  (-1,-1)<->(+1,+1)\n      fwd 1 <-> rev 7  (-1, 0)<->(+1, 0)\n      fwd 4 <-> rev 4  ( 0, 0)<->( 0, 0)\n      fwd 8 <-> rev 0  (+1,+1)<->(-1,-1)\n\n    This maps (dx,dy) to (-dx,-dy).\n    Same as transposing the weight\n    matrix -- exactly what standard\n    backprop does, but computed from\n    the flat 1D array stored in each\n    cell's dendrites.\n\n    FULL PICTURE:\n    Layer above    This cell    Layer below\n     [A][B][C]                   [1][2][3]\n     [D][E][F]      Cell X       [4][5][6]\n     [G][H][I]     error=?       [7][8][9]\n        |                            |\n        v                            v\n    update X's      compute X's error\n    weights using   from below cells'\n    A-I charges     errors + weights", "controls": "Left-click/Drag - Place cells\n    Right-click/Ctrl+click - Inspect cell\n    Close Window - Quit\n\n    Space - Toggle Running (evolution loop)\n    while running:\n        U - Toggle Autonomous Network Genes\n        A - Toggle Andromida mode (genetic\n            birth/death rules)\n        C - Change Charge Delta & Gradient\n            Threshold\n        P - Toggle Activity Prune (charge)\n        = - Toggle Prune Logic AND/OR\n        O - Toggle Gradient Prune\n\n    T - Toggle Training\n        I - Set Learning Rate\n        F - Forward Prop direction\n        R - Reverse Prop direction\n        B - Toggle Back Prop\n\n    G - Toggle Protein/Gene display\n    X - Reset network genes and proteins\n    D - Toggle Display updates\n    V - Cycle statistics views\n    H - Scroll through help screens\n    W - Reset gradient tracking\n    Q - Dump telemetry report\n    L - Load layers\n    S - Save layers\n    M - Load MNIST training data\n    E - Enter Parameters\n    N - Nuke all cells\n    3 - Toggle 3D OpenGL view\n    4 - Toggle 3D backprop view"};
+</script>
+<script>
+/**
+ * Browser port of neurosim/ (pygame + OpenGL) — expects global THREE and HELP_SCREEN.
+ * JSON save/load; synthetic training; optional training JSON import.
+ */
+(function () {
+  'use strict';
+
+  const COLORS = [[13,0,184],[255,165,0],[255,192,203],[255,255,0],[0,255,0],[255,0,0],[179,0,255],[0,0,255]];
+  const WINDOW_WIDTH = 1008, WINDOW_HEIGHT = 1008, WINDOW_EXTENSION = 100;
+  const HELP_PANEL_WIDTH = 500, MAIN_SURFACE_WIDTH = 1508 - HELP_PANEL_WIDTH;
+  const CELL_SIZE = 9;
+  const WIDTH = (WINDOW_WIDTH / CELL_SIZE / 4) | 0;
+  const HEIGHT = (WINDOW_HEIGHT / CELL_SIZE / 4) | 0;
+  const ARRAY_LAYERS = 16;
+  const FASHION_LABELS = '0 T-shirt/top | 1 Trouser | 2 Pullover | 3 Dress | 4 Coat | 5 Sandal | 6 Shirt | 7 Sneaker | 8 Bag | 9 Ankle boot';
+  const WEIGHT_DRAW_THRESHOLD = 0.01;
+  const EPS = 1e-8;
+
+  /** Shown in blue panel — keep in sync with README / mnist_to_neurosim_web_json.py */
+  const QUICK_START = [
+    'QUICK START — read this if training will not run',
+    '',
+    'WHERE ARE MNIST FILES?',
+    '  • Raw downloads go to a folder .mnist_cache/ next to mnist_to_neurosim_web_json.py',
+    '    (your project clone). Open that folder in Finder if you want to see the .gz files.',
+    '  • The JSON you load in the browser is ONLY the file you pass with -o — for example:',
+    '      cd same-folder-as-the-script',
+    '      python3 mnist_to_neurosim_web_json.py -o ./mnist_training_web.json',
+    '    creates ./mnist_training_web.json in THAT terminal current directory (check pwd).',
+    '    In the file picker, navigate to that same folder and pick the .json.',
+    '',
+    '1) Click the big white grid once (keyboard focus). Press ? to scroll this blue panel.',
+    '',
+    '2) Paint hidden neurons (layers 1 … N-2): LEFT-CLICK or CLICK-DRAG on the 16 small',
+    '   quadrant squares. Layer 0 (input) and last layer (targets) come from training data.',
+    '   You need some cells in hidden layers or the network has nothing to train.',
+    '',
+    '3) Load training batches — key M (not in 3D view):',
+    '   • Dialog 1: type J then OK = load real MNIST/Fashion JSON.',
+    '   •          type M then OK = quick fake data (no file).',
+    '   • Dialog 2–3: batch size and start index (for J, count must be ≤ samples in file).',
+    '   • Then your browser opens a file picker — choose e.g. mnist_training_web.json',
+    '     (create it on your computer:  python3 mnist_to_neurosim_web_json.py -o mnist_training_web.json)',
+    '',
+    '4) Start training — key T. Press T again to stop.',
+    '   Tip: key B toggles backprop (learning); leave B ON to update weights.',
+    '',
+    '5) Full key list: key H cycles the long help pages.',
+    '',
+    '6) If keys do nothing: click the canvas again. If 3D (key 3) is on, M/H/V etc.',
+    '   only work after you press 3 again to return to 2D.',
+    '',
+    '7) Offline: you still need the internet once so Three.js loads (or 3D tab stays blank).',
+    '   Saving JSON (S) and loading (L) works offline after that.',
+    '',
+  ].join('\n');
+
+  function clip(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+  function choice(arr) { return arr[(Math.random() * arr.length) | 0]; }
+  function uniform(a, b) { return a + Math.random() * (b - a); }
+  function randn() {
+    let u = 1 - Math.random(), v = 1 - Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  function log10(x) { return Math.log(x) / Math.LN10; }
+  function mean(a) { return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0; }
+  function sumAbsWeights(cells, nl) {
+    let s = 0;
+    for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+      for (let z = 1; z < nl - 1; z++) {
+        const c = cells[x][y][z];
+        if (c) for (let i = 0; i < c.weights.length; i++) s += Math.abs(c.weights[i]);
+      }
+    }
+    return s;
+  }
+
+  function setDefaultValues() {
+    const c = {
+      num_layers: 8, length_of_dendrite: 1, weight_matrix: 3, number_of_weights: 9,
+      mutation_rate: 10, lower_allele_range: 2, upper_allele_range: 15,
+      autonomous_network_genes: false,
+      learning_rate: 0.01, bias_range: 0.01, avg_weights_cell: 5, weight_decay: 1e-6,
+      charge_delta: 0.001, gradient_threshold: 1e-7, gradient_clip_range: 1,
+      weight_change_threshold: 0.005, activation_slope: 0.1,
+      how_much_training_data: 20, start_index: 0, epsilon: EPS,
+    };
+    c.updateDerived = function () {
+      this.weight_matrix = 2 * this.length_of_dendrite + 1;
+      this.number_of_weights = this.weight_matrix * this.weight_matrix;
+    };
+    c.updateDerived();
+    return c;
+  }
+
+  function makeCellsGrid() {
+    const cells = new Array(WIDTH);
+    for (let x = 0; x < WIDTH; x++) {
+      cells[x] = new Array(HEIGHT);
+      for (let y = 0; y < HEIGHT; y++) {
+        cells[x][y] = new Array(ARRAY_LAYERS).fill(null);
+      }
+    }
+    return cells;
+  }
+
+  function SimState() {
+    return {
+      cells: makeCellsGrid(),
+      running: false, prune: false, gradient_prune: false, training_mode: false,
+      andromida_mode: false, charge_change_protection: true, back_prop: false,
+      training_data_loaded: false, display_updating: true, simulating: true, not_saved_yet: true,
+      prune_logic: 'OR', display: 'proteins', direction_of_charge_flow: '+++++>>>>>',
+      show_3d_view: false, show_backprop_view: false, show_training_stats: false, display_set: 0,
+      bingo_count: 0, max_bingo_count: 0, total_cells: 0, total_loss: 0, total_predictions: 0,
+      running_avg_loss: 0, training_cycles: 0, total_weights: 0,
+      total_weights_list: new Float64Array(1000),
+      points: [], epochs: 1, batch_size: 1,
+      training_data_layer_0: [], training_data_num_layer_minus_1: [],
+      rotation_x: 0, rotation_y: 0, rotation_angle: 0, zoom: -15,
+      mouse_up: true, current_index: 0, side_panel_text: [], training_stats_buffer: {},
+      stats_update_frequency: 1, timing: false,
+      /* Per-frame index when training with display on (one sample per animation frame so the grid can repaint). */
+      _training_sample_i: null,
+      _max_reach_per_layer: Object.create(null), _3d_dirty: true,
+      invalidateNeighborCache() {
+        for (const k in this._max_reach_per_layer) delete this._max_reach_per_layer[k];
+        this._3d_dirty = true;
+      },
+      getMaxReachForLayer(layer, cells) {
+        if (this._max_reach_per_layer[layer] == null) {
+          let maxR = 0;
+          for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+            const c = cells[x][y][layer];
+            if (c) maxR = Math.max(maxR, c.reach);
+          }
+          this._max_reach_per_layer[layer] = maxR;
+        }
+        return this._max_reach_per_layer[layer];
+      },
+      reset_training_metrics() {
+        this.bingo_count = 0; this.max_bingo_count = 0; this.total_loss = 0; this.total_predictions = 0;
+        this.running_avg_loss = 0; this.training_cycles = 0; this.points = [];
+      },
+    };
+  }
+
+  let CellConfig = null;
+
+  class Cell {
+    static setConfig(cfg) { CellConfig = cfg; }
+
+    constructor(layer, x, y, wpc, br, aw, cd, wd, mr, genes) {
+      if (!(x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT)) {
+        this.x = clip(x | 0, 0, WIDTH - 1); this.y = clip(y | 0, 0, HEIGHT - 1);
+      } else { this.x = x; this.y = y; }
+      this.layer = layer;
+      if (genes == null) {
+        this.initalizeAllGenes();
+        this.initalizeBreedingGenes();
+        this.initalizeNetworkGenes(wpc, br, aw, cd, wd, mr, null);
+      } else this.genes = genes.slice();
+      this.colorGenes();
+      this.initializeNetworkProteins();
+      this.initalizeCellMemory();
+      this.colorProteins();
+    }
+
+    initalizeCellMemory() {
+      this.forward_charges = []; this.reverse_charges = [];
+      this.max_charge_diff_forward = 0; this.max_charge_diff_reverse = 0;
+      this.significant_charge_change_forward = false; this.significant_charge_change_reverse = false;
+      this.number_of_upper_layer_cells = 0; this.number_of_lower_layer_cells = 0;
+      this.gradient_history = []; this.avg_gradient_magnitude = 0; this.significant_gradient_change = false;
+    }
+    initalizeAllGenes() {
+      this.genes = new Array(12).fill(0);
+      this.colors = new Array(12).fill(0);
+      this.protein_colors = new Array(12).fill(0);
+    }
+    initalizeBreedingGenes() {
+      const cfg = CellConfig;
+      const lo = cfg ? cfg.lower_allele_range : 2, hi = cfg ? cfg.upper_allele_range : 15;
+      this.genes[0] = randInt(lo, hi); this.genes[1] = randInt(lo, hi); this.genes[2] = randInt(lo, hi);
+      if (this.genes[0] < this.genes[1]) { const t = this.genes[0]; this.genes[0] = this.genes[1]; this.genes[1] = t; }
+      this.colorGenes();
+    }
+    initalizeNetworkGenes(wpc, br, aw, cd, wd, mr, cells_array) {
+      const cfg = CellConfig, aut = cfg && cfg.autonomous_network_genes;
+      if (!aut) {
+        this.genes[3] = mr; this.genes[4] = wpc | 0; this.genes[5] = br; this.genes[6] = aw;
+        this.genes[7] = cd; this.genes[8] = wd;
+        this.genes[9] = cfg ? cfg.learning_rate : 0.01;
+        this.genes[10] = cfg ? cfg.gradient_threshold : 1e-7;
+        this.genes[11] = cfg ? cfg.activation_slope : 0.1;
+      } else {
+        this.genes[3] = randInt(0, 99);
+        this.genes[4] = Math.pow(randInt(1, 3) * 2 + 1, 2);
+        this.genes[5] = choice([0.001, 0.01]);
+        this.reach = ((Math.sqrt(this.genes[4]) | 0) - 1) >> 1;
+        if (cells_array) {
+          const u = this.getUpperLayerCells(cells_array, this.reach);
+          this.genes[6] = u.length > 0 ? u.length : aw;
+        } else this.genes[6] = aw;
+        this.genes[7] = Math.pow(10, uniform(-6, -2));
+        this.genes[8] = Math.pow(10, uniform(-6, -4));
+        this.genes[9] = uniform(0.003, 0.05);
+        this.genes[10] = Math.pow(10, uniform(-8, -4));
+        this.genes[11] = uniform(0.01, 0.3);
+      }
+      this.colorGenes();
+    }
+    initializeNetworkProteins() {
+      this.charge = 0; this.gradient = 0; this.error = EPS;
+      this.reach = ((Math.sqrt(this.genes[4]) | 0) - 1) >> 1;
+      const fan = Math.max(this.genes[6], 1), n = this.genes[4] | 0;
+      const sc = Math.sqrt(2 / (fan + 1e-8));
+      this.weights = new Float64Array(n);
+      for (let i = 0; i < n; i++) this.weights[i] = clip(randn() * sc, -1, 1);
+      this.bias = uniform(-this.genes[5], this.genes[5]);
+    }
+    colorGenes() {
+      const g4 = [];
+      for (let i = 0; i < 4; i++) {
+        const g = this.genes[i], col = COLORS[i];
+        g4.push([
+          clip(((col[0] * g / 15) | 0), 0, 255),
+          clip(((col[1] * g / 15) | 0), 0, 255),
+          clip(((col[2] * g / 15) | 0), 0, 255),
+        ]);
+      }
+      const s4 = clip((((this.genes[4] - 9) / 72) * 255) | 0, 0, 255);
+      const s5 = clip((this.genes[5] * 255) | 0, 0, 255);
+      const s6 = clip((((this.genes[6] - 5) / 25) * 255) | 0, 0, 255);
+      const g7v = clip(this.genes[7], 1e-6, 1e-2);
+      const s7 = clip((((log10(g7v) + 6) / 4) * 255) | 0, 0, 255);
+      const g8v = clip(this.genes[8], 1e-6, 1e-4);
+      const s8 = clip((((log10(g8v) + 6) / 2) * 255) | 0, 0, 255);
+      const colors = g4.concat([[s4, 0, s4], [0, s5, s5], [s6, 0, 0], [0, s7, 0], [0, 0, s8]]);
+      const s9 = clip((((this.genes[9] - 0.003) / 0.047) * 255) | 0, 0, 255);
+      const g10v = clip(this.genes[10], 1e-8, 1e-4);
+      const s10 = clip((((log10(g10v) + 8) / 4) * 255) | 0, 0, 255);
+      const s11 = clip((((this.genes[11] - 0.01) / 0.29) * 255) | 0, 0, 255);
+      colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0]);
+      this.colors = colors;
+    }
+    colorProteins() {
+      this.protein_colors = new Array(12).fill(0);
+      const br = this.genes[5];
+      this.protein_colors[0] = [clip((Math.abs(this.bias) / (br + EPS) * 255) | 0, 0, 255), 0, clip((Math.abs(this.bias) / (br + EPS) * 255) | 0, 0, 255)];
+      this.protein_colors[1] = [clip((this.max_charge_diff_forward * 255) | 0, 0, 255), 0, 0];
+      this.protein_colors[2] = [0, 0, clip((this.max_charge_diff_reverse * 255) | 0, 0, 255)];
+      this.protein_colors[4] = [clip((this.charge * 255) | 0, 0, 255), 0, 0];
+      const em = Math.abs(this.error) + EPS;
+      this.protein_colors[6] = [0, 0, clip((255 * (log10(em) + 3) / 2) | 0, 0, 255)];
+      let mw = 0; for (let i = 0; i < this.weights.length; i++) mw += Math.abs(this.weights[i]);
+      mw /= Math.max(1, this.weights.length);
+      this.protein_colors[7] = [0, clip((mw * 255) | 0, 0, 255), 0];
+      const gr = this.charge * this.error;
+      this.protein_colors[8] = [0, 0, clip(Math.log(Math.abs(gr + EPS) * 55) | 0, 0, 255)];
+      this.protein_colors[3] = this.protein_colors[5] = [0, 0, 0];
+      this.protein_colors[9] = this.protein_colors[10] = this.protein_colors[11] = [0, 0, 0];
+    }
+
+    computeTotalCharge(upper, reach) {
+      const cfg = CellConfig;
+      let WM, NW;
+      if (cfg && cfg.autonomous_network_genes) {
+        reach = this.reach; NW = this.genes[4]; WM = Math.sqrt(NW) | 0;
+      } else WM = 2 * reach + 1;
+      let ch = this.bias;
+      for (let k = 0; k < upper.length; k++) {
+        const [dx, dy, cell] = upper[k];
+        const wi = (dx + reach) * WM + (dy + reach);
+        if (wi >= 0 && wi < this.weights.length) ch += cell.charge * this.weights[wi];
+      }
+      this.charge = clip(ch, -10, 10);
+    }
+    computeTotalChargeReverse(lower, reach) {
+      const cfg = CellConfig;
+      const WM = 2 * reach + 1;
+      let ch = this.bias;
+      for (let k = 0; k < lower.length; k++) {
+        const [dx, dy, cell] = lower[k];
+        let cr, cwm;
+        if (cfg && cfg.autonomous_network_genes) {
+          cr = cell.reach; cwm = Math.sqrt(cell.genes[4]) | 0;
+        } else { cr = reach; cwm = WM; }
+        const rx = -dx + cr, ry = -dy + cr;
+        const wi = ry * cwm + rx;
+        if (wi >= 0 && wi < cell.weights.length) ch += cell.charge * cell.weights[wi];
+      }
+      this.charge = clip(ch, -10, 10);
+    }
+    relu(x) {
+      const cfg = CellConfig;
+      const s = (cfg && cfg.autonomous_network_genes) ? this.genes[11] : (cfg ? cfg.activation_slope : 0.1);
+      return x > 0 ? x : s * x;
+    }
+    reluDerivative(x) {
+      const cfg = CellConfig;
+      const s = (cfg && cfg.autonomous_network_genes) ? this.genes[11] : (cfg ? cfg.activation_slope : 0.1);
+      return x > 0 ? 1 : s;
+    }
+    getUpperLayerCells(cells, reach) {
+      const cfg = CellConfig;
+      if (cfg && cfg.autonomous_network_genes) reach = this.reach;
+      const u = [];
+      for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
+        const nx = this.x + dx, ny = this.y + dy;
+        if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+          const c = cells[nx][ny][this.layer - 1];
+          if (c) u.push([dx, dy, c]);
+        }
+      }
+      this.number_of_upper_layer_cells = u.length;
+      return u;
+    }
+    getLayerBelowCells(cells, reach, maxBelow) {
+      const cfg = CellConfig;
+      if (cfg && cfg.autonomous_network_genes) reach = this.reach;
+      const out = [];
+      if (this.layer + 1 >= ARRAY_LAYERS) { this.number_of_lower_layer_cells = 0; return out; }
+      let maxR = maxBelow;
+      if (maxR == null) {
+        maxR = 0;
+        for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+          const c = cells[x][y][this.layer + 1];
+          if (c) maxR = Math.max(maxR, c.reach);
+        }
+      }
+      for (let dx = -maxR; dx <= maxR; dx++) for (let dy = -maxR; dy <= maxR; dy++) {
+        const nx = this.x + dx, ny = this.y + dy;
+        if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+          const b = cells[nx][ny][this.layer + 1];
+          if (b) {
+            const brr = (cfg && cfg.autonomous_network_genes) ? b.reach : reach;
+            if (Math.abs(dx) <= brr && Math.abs(dy) <= brr) out.push([dx, dy, b]);
+          }
+        }
+      }
+      this.number_of_lower_layer_cells = out.length;
+      return out;
+    }
+    computeErrorSignal(desired, conn, reach) {
+      const cfg = CellConfig;
+      if (cfg && cfg.autonomous_network_genes) reach = this.reach;
+      let es = EPS;
+      if (desired != null) {
+        es = (this.charge - desired) * this.reluDerivative(this.charge);
+        this.error = clip(es, -10, 10);
+      } else if (conn != null && reach != null) {
+        for (let k = 0; k < conn.length; k++) {
+          const [dx, dy, cell] = conn[k];
+          let cr, cwm;
+          if (cfg && cfg.autonomous_network_genes) {
+            cr = cell.reach; cwm = Math.sqrt(cell.genes[4]) | 0;
+          } else { cr = reach; cwm = 2 * reach + 1; }
+          const wi = (dx + cr) * cwm + (dy + cr);
+          const rev = cell.weights.length - 1 - wi;
+          if (rev >= 0 && rev < cell.weights.length)
+            es += cell.error * cell.weights[rev] * this.reluDerivative(this.charge);
+        }
+        this.error = clip(es, -10, 10);
+      } else this.error = EPS;
+    }
+    updateWeightsAndBias(conn, lr, reach, wd) {
+      const cfg = CellConfig;
+      const gcr = cfg ? cfg.gradient_clip_range : 1;
+      let WM;
+      if (cfg && cfg.autonomous_network_genes) {
+        reach = this.reach;
+        WM = Math.sqrt(this.genes[4]) | 0;
+        wd = this.genes[8]; lr = this.genes[9];
+      } else WM = 2 * reach + 1;
+      if (this.error == null) this.error = EPS;
+      for (let k = 0; k < conn.length; k++) {
+        const [dx, dy, cell] = conn[k];
+        let g = this.error * cell.charge;
+        g = clip(g, -gcr, gcr);
+        this.gradient = g;
+        this.updateGradientImportance(g);
+        const wi = (dx + reach) * WM + (dy + reach);
+        if (wi >= 0 && wi < this.weights.length)
+          this.weights[wi] -= lr * g + wd * this.weights[wi];
+      }
+      this.bias -= lr * this.error;
+    }
+    updateCharge(nc, dir) {
+      const cfg = CellConfig, hm = cfg ? cfg.how_much_training_data : 20;
+      if (dir === 'forward') {
+        this.forward_charges.push(nc);
+        if (this.forward_charges.length > hm) this.forward_charges.shift();
+        this.max_charge_diff_forward = Math.max(...this.forward_charges) - Math.min(...this.forward_charges);
+        if (this.max_charge_diff_forward > this.genes[7]) this.significant_charge_change_forward = true;
+      } else if (dir === 'reverse') {
+        this.reverse_charges.push(nc);
+        if (this.reverse_charges.length > hm) this.reverse_charges.shift();
+        this.max_charge_diff_reverse = Math.max(...this.reverse_charges) - Math.min(...this.reverse_charges);
+        if (this.max_charge_diff_reverse > this.genes[7]) this.significant_charge_change_reverse = true;
+      }
+      this.charge = nc;
+    }
+    updateGradientImportance(ng) {
+      const cfg = CellConfig, hm = cfg ? cfg.how_much_training_data : 20;
+      const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-7);
+      this.gradient_history.push(Math.abs(ng));
+      if (this.gradient_history.length > hm) this.gradient_history.shift();
+      this.avg_gradient_magnitude = mean(this.gradient_history);
+      if (this.avg_gradient_magnitude > gt) this.significant_gradient_change = true;
+    }
+    resetDirectionalChargeHistory(dir) {
+      if (dir === 'forward' || dir === '+++++>>>>>') {
+        this.forward_charges.length = 0; this.max_charge_diff_forward = 0;
+        this.significant_charge_change_forward = false;
+      } else if (dir === 'reverse' || dir === '<<<<<-----') {
+        this.reverse_charges.length = 0; this.max_charge_diff_reverse = 0;
+        this.significant_charge_change_reverse = false;
+      }
+      this.gradient_history.length = 0; this.avg_gradient_magnitude = 0; this.significant_gradient_change = false;
+    }
+    resetGradientChange() {
+      const cfg = CellConfig;
+      this.significant_gradient_change = false; this.gradient_history.length = 0; this.gradient = 0;
+      this.error = cfg ? cfg.epsilon : EPS;
+    }
+    remapWeights(reach) {
+      const oldM = Math.sqrt(this.weights.length) | 0;
+      const newM = 2 * reach + 1;
+      if (oldM === newM) return;
+      const ok = new Set([9,25,49,81,121,169,225,289,361,441,529,625]);
+      if (!ok.has(this.weights.length)) {
+        const n = newM * newM, fan = Math.max(this.genes[6], 1), sc = Math.sqrt(2 / (fan + 1e-8));
+        this.weights = new Float64Array(n);
+        for (let i = 0; i < n; i++) this.weights[i] = randn() * sc;
+        this.genes[4] = n; this.reach = ((Math.sqrt(n) | 0) - 1) >> 1; return;
+      }
+      const oldG = [];
+      for (let r = 0; r < oldM; r++) {
+        oldG[r] = [];
+        for (let c = 0; c < oldM; c++) oldG[r][c] = this.weights[r * oldM + c];
+      }
+      const newG = [];
+      for (let r = 0; r < newM; r++) newG[r] = new Array(newM).fill(0);
+      const oc = oldM >> 1, nc = newM >> 1, cr = Math.min(oldM, newM);
+      const so = oc - (cr >> 1), sn = nc - (cr >> 1);
+      for (let i = 0; i < cr; i++) for (let j = 0; j < cr; j++)
+        newG[sn + i][sn + j] = oldG[so + i][so + j];
+      if (newM > oldM) {
+        const fan = Math.max(this.genes[6], 1), sc = Math.sqrt(2 / (fan + 1e-8));
+        for (let i = 0; i < newM; i++) for (let j = 0; j < newM; j++)
+          if (newG[i][j] === 0) newG[i][j] = randn() * sc;
+      }
+      const n = newM * newM;
+      this.weights = new Float64Array(n);
+      for (let i = 0; i < newM; i++) for (let j = 0; j < newM; j++) this.weights[i * newM + j] = newG[i][j];
+      this.genes[4] = n; this.reach = ((Math.sqrt(n) | 0) - 1) >> 1;
+    }
+
+    forward(cellsArr) {
+      const cfg = CellConfig;
+      const reach = (cfg && cfg.autonomous_network_genes) ? this.reach : cfg.length_of_dendrite;
+      const up = this.getUpperLayerCells(cellsArr, reach);
+      this.computeTotalCharge(up, reach);
+      this.charge = this.relu(this.charge);
+      this.updateCharge(this.charge, 'forward');
+    }
+    backward(cellsArr, lr, maxBelow) {
+      const cfg = CellConfig;
+      let lrn = (cfg && cfg.autonomous_network_genes) ? this.genes[9] : (lr != null ? lr : cfg.learning_rate);
+      const reach = (cfg && cfg.autonomous_network_genes) ? this.reach : cfg.length_of_dendrite;
+      const wd = (cfg && cfg.autonomous_network_genes) ? this.genes[8] : cfg.weight_decay;
+      if (this.layer === cfg.num_layers - 2) {
+        const t = cellsArr[this.x][this.y][cfg.num_layers - 1];
+        this.computeErrorSignal(t ? t.charge : null, null, null);
+      } else {
+        const below = this.getLayerBelowCells(cellsArr, reach, maxBelow);
+        this.computeErrorSignal(null, below, reach);
+      }
+      const up = this.getUpperLayerCells(cellsArr, reach);
+      this.updateWeightsAndBias(up, lrn, reach, wd);
+    }
+    shouldDie(prune, gp, pl) {
+      if (gp && !this.significant_gradient_change) return true;
+      if (prune) {
+        if (pl === 'AND' && !(this.significant_charge_change_forward && this.significant_charge_change_reverse)) return true;
+        if (pl === 'OR' && !(this.significant_charge_change_forward || this.significant_charge_change_reverse)) return true;
+      }
+      return false;
+    }
+    shouldDieGenetic(nAlive, prot) {
+      if (prot && (this.significant_charge_change_forward || this.significant_charge_change_reverse || this.significant_gradient_change)) return false;
+      return nAlive <= this.genes[1] || nAlive >= this.genes[0];
+    }
+    validate() {
+      const issues = [];
+      for (let i = 0; i < this.weights.length; i++) if (Number.isNaN(this.weights[i])) {
+        issues.push('NaN w'); const n = this.genes[4] | 0, fan = Math.max(this.genes[6], 1), sc = Math.sqrt(2 / (fan + 1e-8));
+        this.weights = new Float64Array(n);
+        for (let j = 0; j < n; j++) this.weights[j] = clip(randn() * sc, -1, 1);
+        break;
+      }
+      if (Number.isNaN(this.charge)) { this.charge = 0; issues.push('NaN c'); }
+      if (Number.isNaN(this.error)) { this.error = EPS; issues.push('NaN e'); }
+      if (Number.isNaN(this.bias)) { this.bias = 0; issues.push('NaN b'); }
+      const ex = ((Math.sqrt(this.genes[4]) | 0) - 1) >> 1;
+      if (this.reach !== ex) { this.reach = ex; issues.push('reach'); }
+      return issues;
+    }
+    toJSON() {
+      return {
+        x:this.x,y:this.y,layer:this.layer,genes:Array.from(this.genes),
+        weights:Array.from(this.weights),bias:this.bias,charge:this.charge,error:this.error,gradient:this.gradient,reach:this.reach,
+        forward_charges:this.forward_charges.slice(),reverse_charges:this.reverse_charges.slice(),
+        max_charge_diff_forward:this.max_charge_diff_forward,max_charge_diff_reverse:this.max_charge_diff_reverse,
+        significant_charge_change_forward:this.significant_charge_change_forward,significant_charge_change_reverse:this.significant_charge_change_reverse,
+        gradient_history:this.gradient_history.slice(),avg_gradient_magnitude:this.avg_gradient_magnitude,significant_gradient_change:this.significant_gradient_change,
+      };
+    }
+    static fromJSON(j) {
+      const c = Object.create(Cell.prototype);
+      c.x=j.x;c.y=j.y;c.layer=j.layer;c.genes=j.genes.slice();
+      c.weights=Float64Array.from(j.weights);c.bias=j.bias;c.charge=j.charge;c.error=j.error;c.gradient=j.gradient;c.reach=j.reach;
+      c.forward_charges=(j.forward_charges||[]).slice();c.reverse_charges=(j.reverse_charges||[]).slice();
+      c.max_charge_diff_forward=j.max_charge_diff_forward||0;c.max_charge_diff_reverse=j.max_charge_diff_reverse||0;
+      c.significant_charge_change_forward=!!j.significant_charge_change_forward;c.significant_charge_change_reverse=!!j.significant_charge_change_reverse;
+      c.gradient_history=(j.gradient_history||[]).slice();c.avg_gradient_magnitude=j.avg_gradient_magnitude||0;c.significant_gradient_change=!!j.significant_gradient_change;
+      c.colors=new Array(12).fill(0);c.protein_colors=new Array(12).fill(0);c.colorGenes();c.colorProteins();
+      return c;
+    }
+    clone() { return Cell.fromJSON(this.toJSON()); }
+    toString() {
+      let g911 = '';
+      if (this.genes.length >= 12) g911 = `  LR=${this.genes[9].toFixed(4)}, GT=${this.genes[10].toExponential(2)}, AS=${this.genes[11].toFixed(2)}\n`;
+      const w = []; for (let i = 0; i < this.weights.length; i++) { if (i && i % 7 === 0) w.push('\n'); w.push(this.weights[i].toFixed(4)); }
+      return `Neuron: layer=${this.layer} x=${this.x} y=${this.y}\n` +
+        `Genes (breeding):\n  OT=${this.genes[0]}, IT=${this.genes[1]}, BT=${this.genes[2]}, MR=${this.genes[3]}\n` +
+        `Genes (network):\n  WG=${this.genes[4]}, BR=${this.genes[5]}, AW=${this.genes[6]}, CD=${this.genes[7].toExponential(4)}, WD=${this.genes[8].toExponential(4)}\n` +
+        g911 + `Proteins:\n  charge=${this.charge.toFixed(4)}, error=${this.error.toExponential(4)}, bias=${this.bias.toFixed(4)}, gradient=${this.gradient.toFixed(4)}\n` +
+        `  reach=${this.reach}\nweights=${w.join(', ')}`;
+    }
+  }
+
+  function forwardPropagation(state, config) {
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (c) c.forward(state.cells);
+      }
+  }
+  function reverseForwardPropagation(state, config) {
+    for (let z = config.num_layers - 2; z > 0; z--)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (!c) continue;
+        if (z === config.num_layers - 2) {
+          const o = state.cells[x][y][config.num_layers - 1];
+          if (o) c.updateCharge(o.charge, 'reverse');
+        } else {
+          const reach = (config.autonomous_network_genes) ? c.reach : config.length_of_dendrite;
+          const low = c.getLayerBelowCells(state.cells, reach, null);
+          c.computeTotalChargeReverse(low, reach);
+          c.updateCharge(c.charge, 'reverse');
+        }
+      }
+  }
+  function backPropagation(state, config, renderBackpropFn) {
+    for (let z = config.num_layers - 2; z > 0; z--) {
+      let maxBelow = null;
+      if (z < config.num_layers - 2) maxBelow = state.getMaxReachForLayer(z + 1, state.cells);
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z];
+        if (c) {
+          c.backward(state.cells, config.learning_rate, maxBelow);
+          if (renderBackpropFn && state.show_3d_view && state.show_backprop_view) renderBackpropFn(z, x, y);
+        }
+      }
+    }
+  }
+  function predictionToActual(state, config) {
+    const nl = config.num_layers, cells = state.cells;
+    const guess = [], actual = [];
+    for (let i = 9; i <= 18; i++) {
+      const a = cells[i][14][nl - 2], b = cells[i][14][nl - 1];
+      guess.push(a ? a.charge : 0); actual.push(b ? b.charge : 0);
+    }
+    let loss = 0;
+    for (let i = 0; i < guess.length; i++) {
+      const pc = clip(guess[i], 1e-7, 1 - 1e-7);
+      loss -= actual[i] * Math.log(pc);
+    }
+    state.total_loss += loss; state.total_predictions += 1;
+    state.running_avg_loss = state.total_loss / state.total_predictions;
+    let pg = 0, pa = 0, mg = guess[0], ma = actual[0];
+    for (let i = 1; i < guess.length; i++) { if (guess[i] > mg) { mg = guess[i]; pg = i; } if (actual[i] > ma) { ma = actual[i]; pa = i; } }
+    if (pg === pa) { state.bingo_count++; if (state.bingo_count > state.max_bingo_count) state.max_bingo_count = state.bingo_count; }
+  }
+  function trainNetwork(state, config, renderBackpropFn) {
+    for (let e = 0; e < state.epochs; e++) {
+      if (state.direction_of_charge_flow === '+++++>>>>>') {
+        forwardPropagation(state, config);
+        if (state.back_prop) backPropagation(state, config, renderBackpropFn);
+        predictionToActual(state, config);
+      }
+      if (state.direction_of_charge_flow === '<<<<<-----') reverseForwardPropagation(state, config);
+    }
+  }
+  function trainOnSample(state, config, sampleIndex, renderBackpropFn) {
+    applyLayerFromGrid(state.cells, 0, state.training_data_layer_0[sampleIndex]);
+    applyLayerFromGrid(state.cells, config.num_layers - 1, state.training_data_num_layer_minus_1[sampleIndex]);
+    state.total_weights = sumAbsWeights(state.cells, config.num_layers);
+    const setSize = config.how_much_training_data;
+    if (state.total_weights_list.length < setSize) state.total_weights_list = new Float64Array(setSize + 10);
+    state.total_weights_list[sampleIndex] = state.total_weights;
+    trainNetwork(state, config, renderBackpropFn);
+  }
+
+  function training(state, config, drawFn, renderBackpropFn) {
+    state.bingo_count = 0;
+    const setSize = config.how_much_training_data;
+    for (let i = 0; i < setSize; i++) {
+      trainOnSample(state, config, i, renderBackpropFn);
+      if (state.display_updating && drawFn) drawFn();
+    }
+  }
+
+  function applyLayerFromGrid(cells, layer, grid) {
+    for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+      const g = grid[x][y];
+      cells[x][y][layer] = g ? (g instanceof Cell ? g.clone() : Cell.fromJSON(g)) : null;
+    }
+  }
+  function copyLayerGrid(grid) {
+    const g = [];
+    for (let x = 0; x < WIDTH; x++) {
+      g[x] = [];
+      for (let y = 0; y < HEIGHT; y++) {
+        const c = grid[x][y];
+        g[x][y] = c ? (c instanceof Cell ? c.clone() : Cell.fromJSON(c)) : null;
+      }
+    }
+    return g;
+  }
+
+  function buildNeighborOffsets(z, numLayers) {
+    const o = [];
+    if (z === 1) {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz of [0, 1]) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        o.push([dx, dy, dz]);
+      }
+    } else if (z === numLayers - 2) {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz of [0, -1]) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        o.push([dx, dy, dz]);
+      }
+    } else {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        if (dx === 0 && dy === 0 && dz === 0) continue;
+        o.push([dx, dy, dz]);
+      }
+    }
+    return o;
+  }
+
+  function updateCells(state, config) {
+    const start = 1, stop = config.num_layers - 1;
+    const cells = state.cells;
+    for (let z = start; z < stop; z++) {
+      const neighOfs = buildNeighborOffsets(z, config.num_layers);
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        if (cells[x][y][z]) {
+          const cell = cells[x][y][z];
+          if (cell.shouldDie(state.prune, state.gradient_prune, state.prune_logic)) {
+            cells[x][y][z] = null; state.invalidateNeighborCache(); continue;
+          }
+        }
+        if (cells[x][y][z]) {
+          const cell = cells[x][y][z];
+          if (Math.random() < cell.genes[3] / 100000) {
+            if (Math.random() < 0.5) cell.initalizeBreedingGenes();
+            else cell.initalizeNetworkGenes(config.number_of_weights, config.bias_range, config.avg_weights_cell,
+              config.charge_delta, config.weight_decay, config.mutation_rate, cells);
+          }
+        }
+        if (state.andromida_mode) {
+          const alive = [];
+          for (let k = 0; k < neighOfs.length; k++) {
+            const [dx, dy, dz] = neighOfs[k];
+            const nx = x + dx, ny = y + dy, nz = z + dz;
+            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT && nz >= 0 && nz < ARRAY_LAYERS && cells[nx][ny][nz])
+              alive.push(cells[nx][ny][nz]);
+          }
+          const numAlive = alive.length;
+          if (cells[x][y][z] == null && alive.length) {
+            let newGenes = null;
+            if (alive.length >= 2) {
+              const p1 = alive[(Math.random() * alive.length) | 0];
+              const p2 = alive[(Math.random() * alive.length) | 0];
+              newGenes = [];
+              for (let g = 0; g < p1.genes.length; g++) newGenes.push(Math.random() < 0.5 ? p1.genes[g] : p2.genes[g]);
+            } else {
+              newGenes = alive[0].genes.slice();
+            }
+            if (numAlive === newGenes[2]) {
+              cells[x][y][z] = new Cell(z, x, y, config.number_of_weights, config.bias_range, config.avg_weights_cell,
+                config.charge_delta, config.weight_decay, config.mutation_rate, newGenes);
+              state.invalidateNeighborCache();
+              const nc = cells[x][y][z];
+              if (Math.random() < nc.genes[3] / 1000) nc.initalizeBreedingGenes();
+              if (Math.random() < nc.genes[3] / 1000)
+                nc.initalizeNetworkGenes(config.number_of_weights, config.bias_range, config.avg_weights_cell,
+                  config.charge_delta, config.weight_decay, config.mutation_rate, cells);
+            }
+          }
+          if (cells[x][y][z]) {
+            const cell = cells[x][y][z];
+            if (cell.shouldDieGenetic(numAlive, state.charge_change_protection)) {
+              cells[x][y][z] = null; state.invalidateNeighborCache();
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function resetAllGradientChanges(state, config) {
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z];
+        if (c) { c.resetGradientChange(); c.significant_charge_change_forward = false; c.significant_charge_change_reverse = false; }
+      }
+  }
+  function resetDirectionalChargeHistoryAll(state, config, dir) {
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (c) c.resetDirectionalChargeHistory(dir);
+      }
+  }
+
+  function computeTelemetry(state, config) {
+    const telem = [];
+    for (let z = 1; z < config.num_layers - 1; z++) {
+      const t = { layer_id: z, num_cells: 0, num_active: 0, avg_charge: 0, avg_error: 0, avg_gradient: 0,
+        max_gradient: 0, min_gradient: 0, avg_weight_magnitude: 0, avg_weights_per_cell: 0, nan_count: 0 };
+      const layerCells = [];
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (c) layerCells.push(c);
+      }
+      t.num_cells = layerCells.length;
+      const active = layerCells.filter(c => c.weights.length > 0 && c.weights.some(w => Math.abs(w) > config.epsilon));
+      t.num_active = active.length;
+      let nan = 0;
+      for (let i = 0; i < layerCells.length; i++) nan += layerCells[i].validate().length;
+      t.nan_count = nan;
+      if (active.length) {
+        const grads = active.map(c => c.gradient);
+        t.avg_gradient = mean(grads); t.max_gradient = Math.max(...grads); t.min_gradient = Math.min(...grads);
+        t.avg_error = mean(active.map(c => Math.abs(c.error)));
+        t.avg_charge = mean(active.map(c => Math.abs(c.charge)));
+        t.avg_weight_magnitude = mean(active.map(c => {
+          let s = 0; for (let j = 0; j < c.weights.length; j++) s += Math.abs(c.weights[j]); return s / c.weights.length;
+        }));
+        t.avg_weights_per_cell = mean(active.map(c => c.weights.length));
+      }
+      telem.push(t);
+    }
+    return telem;
+  }
+  function formatTelemetry(telem) {
+    const lines = ['=== Layer Telemetry ==='];
+    let total = 0;
+    for (let i = 0; i < telem.length; i++) {
+      const t = telem[i];
+      lines.push(`Layer ${t.layer_id}: ${t.num_active}/${t.num_cells} active`);
+      lines.push(`  Charge: ${t.avg_charge.toFixed(4)} | Error: ${t.avg_error.toExponential(4)}`);
+      lines.push(`  Gradient: avg=${t.avg_gradient.toExponential(4)} max=${t.max_gradient.toExponential(4)} min=${t.min_gradient.toExponential(4)}`);
+      lines.push(`  Weights: mag=${t.avg_weight_magnitude.toFixed(4)} per_cell=${t.avg_weights_per_cell.toFixed(1)}`);
+      if (t.nan_count) lines.push(`  *** NaN issues: ${t.nan_count} ***`);
+      total += t.nan_count;
+    }
+    lines.push(total ? `\n*** TOTAL NaN ISSUES: ${total} ***` : '\nNo NaN issues detected.');
+    return lines.join('\n');
+  }
+
+  function drawGrid(ctx) {
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    for (let x = 0; x <= WINDOW_WIDTH; x += WINDOW_WIDTH / 4) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WINDOW_HEIGHT); ctx.stroke();
+    }
+    for (let y = 0; y <= WINDOW_HEIGHT; y += WINDOW_HEIGHT / 4) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WINDOW_WIDTH, y); ctx.stroke();
+    }
+  }
+  function drawCells(state, config, ctx) {
+    const disp = state.display;
+    for (let z = 0; z < config.num_layers; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const cell = state.cells[x][y][z]; if (!cell) continue;
+        if (disp === 'genes') cell.colorGenes(); else cell.colorProteins();
+        const px = (i) => x * CELL_SIZE + (i % 3) * (CELL_SIZE / 3) + (z % 4) * (WINDOW_WIDTH / 4);
+        const py = (i) => y * CELL_SIZE + ((i / 3) | 0) % 3 * (CELL_SIZE / 3) + ((z / 4) | 0) * (WINDOW_HEIGHT / 4);
+        const pal = disp === 'genes' ? cell.colors : cell.protein_colors;
+        const cs = CELL_SIZE / 3;
+        for (let i = 0; i < 9; i++) {
+          const col = pal[i];
+          if (!col || col === 0) continue;
+          const [r, g, b] = col;
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          ctx.fillRect(px(i), py(i), cs, cs);
+        }
+      }
+  }
+
+  function updateCellTypes(cells, config) {
+    const types = Object.create(null);
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z]; if (!c) continue;
+        const key = JSON.stringify(c.genes.slice(0, 4));
+        types[key] = (types[key] || 0) + 1;
+      }
+    return types;
+  }
+  function updatePhenotypeCellTypes(cells, config) {
+    let countPos = 0, total = 0;
+    const charges = [], biases = [], errors = [], wavg = [], grads = [], mf = [], mr = [];
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z]; if (!c) continue;
+        total++;
+        if (c.weights.every(w => w === 0 || w === config.epsilon)) continue;
+        countPos++;
+        charges.push(c.charge); biases.push(c.bias); errors.push(c.error);
+        let s = 0; for (let i = 0; i < c.weights.length; i++) s += c.weights[i];
+        wavg.push(s / c.weights.length); grads.push(c.gradient);
+        mf.push(c.max_charge_diff_forward); mr.push(c.max_charge_diff_reverse);
+      }
+    if (!countPos) return [0, total, {}];
+    const cm = mean(charges), cs = Math.sqrt(mean(charges.map(v => (v - cm) * (v - cm)))) || 1e-8;
+    const bm = mean(biases), bs = Math.sqrt(mean(biases.map(v => (v - bm) * (v - bm)))) || 1e-8;
+    const em = mean(errors), es = Math.sqrt(mean(errors.map(v => (v - em) * (v - em)))) || 1e-8;
+    const wm = mean(wavg), ws = Math.sqrt(mean(wavg.map(v => (v - wm) * (v - wm)))) || 1e-8;
+    const gm = mean(grads), gs = Math.sqrt(mean(grads.map(v => (v - gm) * (v - gm)))) || 1e-8;
+    const fm = mean(mf), fs = Math.sqrt(mean(mf.map(v => (v - fm) * (v - fm)))) || 1e-8;
+    const rm = mean(mr), rs = Math.sqrt(mean(mr.map(v => (v - rm) * (v - rm)))) || 1e-8;
+    const dict = Object.create(null);
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z]; if (!c) continue;
+        let s = 0; for (let i = 0; i < c.weights.length; i++) s += c.weights[i];
+        const wa = s / c.weights.length;
+        const ph = [
+          'charge:' + (c.charge > cm ? '+' : '-') + (Math.abs(c.charge - cm) / cs | 0),
+          'bias:' + (c.bias > bm ? '+' : '-') + (Math.abs(c.bias - bm) / bs | 0),
+          'error:' + (c.error > em ? '+' : '-') + (Math.abs(c.error - em) / es | 0),
+          'weights:' + (wa > wm ? '+' : '-') + (Math.abs(wa - wm) / ws | 0),
+          'gradient:' + (c.gradient > gm ? '+' : '-') + (Math.abs(c.gradient - gm) / gs | 0),
+          'max_fwd:' + (c.max_charge_diff_forward > fm ? '+' : '-') + (Math.abs(c.max_charge_diff_forward - fm) / fs | 0),
+          'max_rev:' + (c.max_charge_diff_reverse > rm ? '+' : '-') + (Math.abs(c.max_charge_diff_reverse - rm) / rs | 0),
+        ];
+        const key = ph.join('|');
+        if (!dict[key]) dict[key] = [];
+        dict[key].push(c);
+      }
+    return [countPos, total, dict];
+  }
+  function displayStatistics(cellTypes, uiPrint) {
+    const sorted = Object.entries(cellTypes).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    let mf = 0; for (const k of Object.keys(cellTypes)) mf += JSON.parse(k)[3] | 0;
+    const avg = Object.keys(cellTypes).length ? mf / Object.keys(cellTypes).length : 0;
+    const lines = ['[OT IT BT] CH WG ER BI: Overcrowding Isolation Birth'];
+    for (const [ct, cnt] of sorted) lines.push(`Type: ${ct} | Count: ${cnt}`);
+    lines.push(`\nAverage Mutation Frequency: ${avg.toFixed(2)}`);
+    uiPrint('\nDisplaying statistics for the top 5 cell types:', 10);
+    uiPrint(lines.join('\n'));
+  }
+  function displayPhenotypeStatistics(phen, uiPrint) {
+    const [_, __, dict] = phen;
+    const rows = Object.entries(dict).map(([ph, cl]) => {
+      const ac = mean(cl.map(c => c.charge)), ab = mean(cl.map(c => c.bias)), ae = mean(cl.map(c => c.error));
+      const aw = mean(cl.map(c => { let s = 0; for (let i = 0; i < c.weights.length; i++) s += c.weights[i]; return s / c.weights.length; }));
+      const ag = mean(cl.map(c => c.gradient)), amf = mean(cl.map(c => c.max_charge_diff_forward)), amr = mean(cl.map(c => c.max_charge_diff_reverse));
+      return [ph, cl.length, ac, ab, ae, aw, ag, amf, amr];
+    }).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    uiPrint('\nDisplaying statistics for the top 5 phenotypes:');
+    const lines = ['Phenotype: Avg Charge | Avg Bias | Avg Error | Avg Weights | Avg Gradient | Avg Max Fwd | Avg Max Rev'];
+    for (const [ph, cnt, ac, ab, ae, aw, ag, amf, amr] of rows)
+      lines.push(`${ph} | Count: ${cnt} \nCharge: ${ac.toFixed(4)} | Bias: ${ab.toFixed(4)} | Error: ${ae.toExponential(4)} | Weights: ${aw.toFixed(4)} | Gradient: ${ag.toExponential(4)} | MaxFwd: ${amf.toFixed(4)} | MaxRev: ${amr.toFixed(4)}`);
+    uiPrint(lines.join('\n'));
+  }
+  function displayMaxChargeDiff(state, config, N, uiPrint) {
+    const diffs = [];
+    for (let z = 1; z < config.num_layers - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (!c) continue;
+        const cd = state.direction_of_charge_flow === '+++++>>>>>' ? c.max_charge_diff_forward : c.max_charge_diff_reverse;
+        diffs.push([x, y, z, cd]);
+      }
+    diffs.sort((a, b) => b[3] - a[3]);
+    uiPrint('\nMax charge difference for top 5 cells:');
+    uiPrint(diffs.slice(0, N).map(([x, y, l, cd]) => `Cell at (${x}, ${y}, ${l}) - Charge difference: ${cd.toFixed(2)}`).join('\n'));
+  }
+  function displayAverages(state, config, uiPrint) {
+    const nl = config.num_layers, eps = config.epsilon;
+    const avgG = new Float64Array(nl), maxG = new Float64Array(nl), minG = new Float64Array(nl);
+    const avgE = new Float64Array(nl), avgC = new Float64Array(nl), avgW = new Float64Array(nl), avgWpc = new Float64Array(nl);
+    let tcells = 0, activeCells = 0;
+    for (let z = 1; z < nl - 1; z++) {
+      const inLayer = [];
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) { const c = state.cells[x][y][z]; if (c) inLayer.push(c); }
+      tcells += inLayer.length;
+      const active = inLayer.filter(c => c.weights.some(w => w !== 0 && w !== eps));
+      activeCells += active.length;
+      if (active.length) {
+        const grads = active.map(c => c.gradient);
+        avgG[z] = mean(grads); maxG[z] = Math.max(...grads); minG[z] = Math.min(...grads);
+        avgE[z] = mean(active.map(c => Math.abs(c.error)));
+        avgC[z] = mean(active.map(c => Math.abs(c.charge)));
+        avgW[z] = mean(active.map(c => { let s = 0; for (let i = 0; i < c.weights.length; i++) s += Math.abs(c.weights[i]); return s / c.weights.length; }));
+        avgWpc[z] = mean(active.map(c => c.weights.length));
+      }
+    }
+    const out = [];
+    out.push(`Predictions: ${state.total_predictions} | Average Loss: ${state.running_avg_loss.toExponential(4)}`);
+    out.push(`Active Cells: ${activeCells}/${tcells}\n\nLayer-wise Statistics:`);
+    for (let z = 1; z < nl - 1; z++) {
+      out.push(`Layer ${z}:`);
+      out.push(`  Gradient: ${avgG[z].toExponential(4)}, Max: ${maxG[z].toExponential(4)}, Min: ${minG[z].toExponential(4)}`);
+      out.push(`  Error: ${avgE[z].toExponential(4)}\n  Charge: ${avgC[z].toFixed(4)}`);
+      out.push(`  Weights: ${avgW[z].toFixed(4)}\n  Avg Weights/Cell: ${avgWpc[z].toFixed(2)}`);
+    }
+    uiPrint('\nNetwork Statistics:', 10);
+    uiPrint(out.join('\n'), 50);
+  }
+  function predictionPlot(state, predCtx) {
+    const W = predCtx.canvas.width, H = predCtx.canvas.height;
+    predCtx.fillStyle = '#000'; predCtx.fillRect(0, 0, W, H);
+    const offset = 0;
+    let y = H - (state.running_avg_loss / 10) * H;
+    if (!Number.isFinite(y)) y = H / 2;
+    state.points.push([state.points.length + offset, y]);
+    if (state.points.length > 200) { state.points.shift(); for (let i = 0; i < state.points.length; i++) state.points[i][0]--; }
+    predCtx.fillStyle = '#00f';
+    for (let i = 0; i < state.points.length; i++) {
+      const [px, py] = state.points[i];
+      predCtx.beginPath(); predCtx.arc(px % W, clip(py, 0, H), 2, 0, Math.PI * 2); predCtx.fill();
+    }
+  }
+  function updateTrainingStats(state, config) {
+    const eps = config.epsilon, nl = config.num_layers;
+    let tcells = 0, tw = 0;
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (!c) continue;
+        tcells++; tw += c.weights.length;
+      }
+    const avgWpc = tw / (tcells + eps);
+    const phen = updatePhenotypeCellTypes(state.cells, config);
+    const geno = updateCellTypes(state.cells, config);
+    const top = Object.entries(geno).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    let an = 0, nz = 0;
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (!c) continue;
+        if (c.weights.some(w => w !== 0)) an++;
+        for (let i = 0; i < c.weights.length; i++) if (c.weights[i] !== 0) nz++;
+      }
+    const grads = [];
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (c) grads.push(Math.abs(c.gradient));
+      }
+    state.training_stats_buffer = {
+      Accuracy: `${state.bingo_count}/${config.how_much_training_data} (Max: ${state.max_bingo_count})`,
+      'Avg Loss': state.running_avg_loss.toExponential(4),
+      'Total Predictions': state.total_predictions,
+      'Avg Weights/Cell': avgWpc.toFixed(2),
+      'Total Weights': tw.toFixed(2),
+      'Total Cells': tcells,
+      'Active Cells': `${phen[0]}/${phen[1]}`,
+      'Top Genotypes': top,
+      'Active Neurons': `${an}/${tcells}`,
+      'Avg Connections/Neuron': (nz / (tcells + eps)).toFixed(2),
+      'Max Gradient': (Math.max(...grads, 0)).toExponential(4),
+      'Avg Gradient': (mean(grads)).toExponential(4),
+    };
+  }
+  function displayTrainingStats(state, uiPrint) {
+    const b = state.training_stats_buffer;
+    let s = `Training Statistics:\nAccuracy: ${b.Accuracy}\nAvg Loss: ${b['Avg Loss']}\nTotal Predictions: ${b['Total Predictions']}\n`;
+    s += `Avg Weights/Cell: ${b['Avg Weights/Cell']}\nTotal Weights: ${b['Total Weights']}\nTotal Cells: ${b['Total Cells']}\n`;
+    s += `Active Cells: ${b['Active Cells']}\nTop Genotypes:\n`;
+    for (const [g, c] of b['Top Genotypes']) s += `  ${g}: ${c}\n`;
+    s += `Active Neurons: ${b['Active Neurons']}\nAvg Connections/Neuron: ${b['Avg Connections/Neuron']}\n`;
+    s += `Max Gradient: ${b['Max Gradient']}\nAvg Gradient: ${b['Avg Gradient']}\n`;
+    uiPrint(s, 10);
+  }
+
+  function getAllSettings(state, config) {
+    return `Current Settings:
+    Num_Layers: ${ config.num_layers}
+    LENGTH_OF_DENDRITE: ${ config.length_of_dendrite}
+    WEIGHT_MATRIX: ${ config.weight_matrix}
+    NUMBER_OF_WEIGHTS: ${ config.number_of_weights}
+    Mutation Rate Per 10,000 Cycles: ${ config.mutation_rate}
+    Lower Allele Range: ${ config.lower_allele_range}
+    Upper Allele Range: ${ config.upper_allele_range}
+    Weight Change Threshold: ${ config.weight_change_threshold}
+    Learning Rate: ${ config.learning_rate}
+    Bias Range: ${ config.bias_range}
+    Avg Weights per Cell: ${ config.avg_weights_cell}
+    Weight Decay: ${ config.weight_decay}
+    Charge Delta: ${ config.charge_delta}
+    Gradient Clip Range: ${ config.gradient_clip_range}
+    Training Data Size: ${ config.how_much_training_data}
+    Start Index: ${ config.start_index}
+    Display Mode: ${ state.display}
+    Direction of Charge Flow: ${ state.direction_of_charge_flow}
+    Prune Logic: ${ state.prune_logic}`;
+  }
+
+  function serializeCells(cells) {
+    const o = [];
+    for (let x = 0; x < WIDTH; x++) {
+      o[x] = [];
+      for (let y = 0; y < HEIGHT; y++) {
+        o[x][y] = [];
+        for (let z = 0; z < ARRAY_LAYERS; z++) {
+          const c = cells[x][y][z];
+          o[x][y][z] = c ? c.toJSON() : null;
+        }
+      }
+    }
+    return o;
+  }
+  function deserializeCells(data, config) {
+    Cell.setConfig(config);
+    const cells = makeCellsGrid();
+    for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) for (let z = 0; z < ARRAY_LAYERS; z++) {
+      const j = data[x][y][z];
+      cells[x][y][z] = j ? Cell.fromJSON(j) : null;
+    }
+    return cells;
+  }
+  function configToJSON(config) {
+    return {
+      num_layers: config.num_layers, length_of_dendrite: config.length_of_dendrite, weight_matrix: config.weight_matrix,
+      number_of_weights: config.number_of_weights, mutation_rate: config.mutation_rate,
+      lower_allele_range: config.lower_allele_range, upper_allele_range: config.upper_allele_range,
+      autonomous_network_genes: config.autonomous_network_genes,
+      learning_rate: config.learning_rate, bias_range: config.bias_range, avg_weights_cell: config.avg_weights_cell,
+      weight_decay: config.weight_decay, charge_delta: config.charge_delta, gradient_threshold: config.gradient_threshold,
+      gradient_clip_range: config.gradient_clip_range, weight_change_threshold: config.weight_change_threshold,
+      activation_slope: config.activation_slope, how_much_training_data: config.how_much_training_data, start_index: config.start_index,
+      epsilon: config.epsilon,
+    };
+  }
+  function configFromJSON(j) {
+    const c = Object.assign(setDefaultValues(), j);
+    c.updateDerived();
+    return c;
+  }
+
+  function buildSyntheticTraining(config) {
+    Cell.setConfig(config);
+    const out0 = [], outL = [];
+    for (let x = 0; x < WIDTH; x++) {
+      out0[x] = []; outL[x] = [];
+      for (let y = 0; y < HEIGHT; y++) {
+        out0[x][y] = new Cell(0, x, y, config.number_of_weights, config.bias_range, config.avg_weights_cell,
+          config.charge_delta, config.weight_decay, config.mutation_rate, null);
+        out0[x][y].charge = Math.random();
+        outL[x][y] = new Cell(config.num_layers - 1, x, y, config.number_of_weights, config.bias_range, config.avg_weights_cell,
+          config.charge_delta, config.weight_decay, config.mutation_rate, null);
+        outL[x][y].charge = 0;
+      }
+    }
+    const label = (Math.random() * 10) | 0;
+    for (let i = 0; i < 10; i++) outL[9 + i][14].charge = (i === label) ? 1 : 0;
+    return { layer0: copyLayerGrid(out0), layerLast: copyLayerGrid(outL) };
+  }
+
+  /** Map pointer to bitmap coords when CSS resizes the canvas (fixes wrong hit below fold). */
+  function canvasPointerToInternal(canvas, clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const sx = canvas.width / Math.max(r.width, 1e-6);
+    const sy = canvas.height / Math.max(r.height, 1e-6);
+    const mx = (clientX - r.left) * sx;
+    const my = (clientY - r.top) * sy;
+    return [clip(mx, 0, WINDOW_WIDTH - 1e-6), clip(my, 0, WINDOW_HEIGHT - 1e-6)];
+  }
+
+  function convertXYToIndex(mx, my) {
+    const lx = (mx / (WINDOW_WIDTH / 4)) | 0;
+    const ly = (my / (WINDOW_HEIGHT / 4)) | 0;
+    const layer = lx + ly * 4;
+    const ax = mx - lx * (WINDOW_WIDTH / 4);
+    const ay = my - ly * (WINDOW_HEIGHT / 4);
+    const cellX = Math.min((ax / CELL_SIZE) | 0, WIDTH - 1);
+    const cellY = Math.min((ay / CELL_SIZE) | 0, HEIGHT - 1);
+    return [cellX, cellY, layer];
+  }
+
+  // --- Three.js 3D cache ---
+  let g3 = {
+    scene: null, camera: null, renderer: null,
+    root: null,
+    ptsIn: null, ptsHid: null, ptsOut: null,
+    lines: null,
+    cellRefs: [],
+    nIn: 0, nHid: 0, nOut: 0,
+    backpropGroup: null,
+  };
+
+  function hsvToRgb(h, s, v) {
+    if (s === 0) return [v, v, v];
+    const i = (h * 6) | 0;
+    const f = h * 6 - i;
+    const p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+    const m = i % 6;
+    if (m === 0) return [v, t, p];
+    if (m === 1) return [q, v, p];
+    if (m === 2) return [p, v, t];
+    if (m === 3) return [p, q, v];
+    if (m === 4) return [t, p, v];
+    return [v, p, q];
+  }
+  function layerColor(layer, nl, charge) {
+    const t = nl <= 1 ? 0.5 : layer / (nl - 1);
+    const h = 0.6 * (1 - t);
+    const s = 0.85, v = 0.5 + 0.5 * Math.min(Math.abs(charge), 1);
+    return hsvToRgb(h, s, v);
+  }
+
+  function init3d(canvas) {
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
+    camera.position.set(0, 0, 22);
+    camera.up.set(0, 1, 0);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+    renderer.setClearColor(0x101018, 1);
+    const root = new THREE.Group();
+    scene.add(root);
+    const matIn = new THREE.PointsMaterial({ size: 6, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95 });
+    const matH = new THREE.PointsMaterial({ size: 8, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95 });
+    const matO = new THREE.PointsMaterial({ size: 14, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95 });
+    const ptsIn = new THREE.Points(new THREE.BufferGeometry(), matIn);
+    const ptsHid = new THREE.Points(new THREE.BufferGeometry(), matH);
+    const ptsOut = new THREE.Points(new THREE.BufferGeometry(), matO);
+    root.add(ptsIn); root.add(ptsHid); root.add(ptsOut);
+    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 });
+    const lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMat);
+    root.add(lines);
+    const backpropGroup = new THREE.Group();
+    root.add(backpropGroup);
+    g3 = { scene, camera, renderer, root, ptsIn, ptsHid, ptsOut, lines, cellRefs: [], nIn: 0, nHid: 0, nOut: 0, backpropGroup };
+  }
+
+  function rebuild3dCache(state, config) {
+    const cells = state.cells, nl = config.num_layers;
+    let nIn = 0, nHid = 0, nOut = 0;
+    for (let z = 0; z < nl; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        if (!cells[x][y][z]) continue;
+        if (z === 0) nIn++; else if (z === nl - 1) nOut++; else nHid++;
+      }
+    const total = nIn + nHid + nOut;
+    const pos = new Float32Array(Math.max(total, 1) * 3);
+    const col = new Float32Array(Math.max(total, 1) * 3);
+    const refs = [];
+    const connPos = [];
+    const connCol = [];
+    const halfW = WIDTH / 2, halfH = HEIGHT / 2;
+    let idxI = 0, idxH = nIn, idxO = nIn + nHid;
+
+    function putPoint(idx, x, y, z, layer, c) {
+      const px = x - halfW, py = y - halfH, pz = layer * 2 - nl;
+      pos[idx * 3] = px; pos[idx * 3 + 1] = py; pos[idx * 3 + 2] = pz;
+      const [r, g, b] = layerColor(layer, nl, c.charge);
+      col[idx * 3] = r; col[idx * 3 + 1] = g; col[idx * 3 + 2] = b;
+      refs[idx] = [x, y, layer];
+
+      if (layer === 0) return;
+      if (layer === nl - 1) {
+        if (cells[x][y][layer - 1]) {
+          const prevZ = (layer - 1) * 2 - nl;
+          connPos.push(px, py, pz, px, py, prevZ);
+          connCol.push(0.2, 0.9, 0.2, 0.2, 0.9, 0.2);
+        }
+        return;
+      }
+      const cell = c;
+      const reach = config.autonomous_network_genes ? cell.reach : config.length_of_dendrite;
+      const prevZ = (layer - 1) * 2 - nl;
+      const wm = config.autonomous_network_genes ? (Math.sqrt(cell.genes[4]) | 0) : config.weight_matrix;
+      for (let dx = -reach; dx <= reach; dx++) {
+        const nx = x + dx; if (nx < 0 || nx >= WIDTH) continue;
+        for (let dy = -reach; dy <= reach; dy++) {
+          const ny = y + dy; if (ny < 0 || ny >= HEIGHT) continue;
+          if (!cells[nx][ny][layer - 1]) continue;
+          const wi = (dx + reach) * wm + (dy + reach);
+          if (wi >= cell.weights.length) continue;
+          const w = cell.weights[wi];
+          if (Math.abs(w) < WEIGHT_DRAW_THRESHOLD) continue;
+          const inten = Math.min(Math.abs(w), 1);
+          const npx = nx - halfW, npy = ny - halfH;
+          connPos.push(px, py, pz, npx, npy, prevZ);
+          if (w > 0) connCol.push(0, inten, 0, 0, inten, 0);
+          else connCol.push(inten, 0, 0, inten, 0, 0);
+        }
+      }
+    }
+
+    for (let z = 0; z < nl; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z]; if (!c) continue;
+        if (z === 0) putPoint(idxI++, x, y, z, z, c);
+      }
+    for (let z = 0; z < nl; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z]; if (!c) continue;
+        if (z > 0 && z < nl - 1) putPoint(idxH++, x, y, z, z, c);
+      }
+    for (let z = 0; z < nl; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z]; if (!c) continue;
+        if (z === nl - 1) putPoint(idxO++, x, y, z, z, c);
+      }
+
+    g3.nIn = nIn; g3.nHid = nHid; g3.nOut = nOut; g3.cellRefs = refs;
+
+    function setGeom(pts, start, count, posArr, colArr) {
+      const g = pts.geometry;
+      const np = count * 3;
+      const psub = new Float32Array(np);
+      const csub = new Float32Array(np);
+      for (let i = 0; i < np; i++) { psub[i] = posArr[start * 3 + i]; csub[i] = colArr[start * 3 + i]; }
+      g.setAttribute('position', new THREE.BufferAttribute(psub, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(csub, 3));
+      g.computeBoundingSphere();
+      pts.geometry = g;
+    }
+    if (total === 0) {
+      g3.ptsIn.geometry.dispose();
+      g3.ptsHid.geometry.dispose();
+      g3.ptsOut.geometry.dispose();
+      g3.ptsIn.geometry = new THREE.BufferGeometry();
+      g3.ptsHid.geometry = new THREE.BufferGeometry();
+      g3.ptsOut.geometry = new THREE.BufferGeometry();
+      g3.lines.geometry.dispose();
+      g3.lines.geometry = new THREE.BufferGeometry();
+    } else {
+      setGeom(g3.ptsIn, 0, nIn, pos, col);
+      setGeom(g3.ptsHid, nIn, nHid, pos, col);
+      setGeom(g3.ptsOut, nIn + nHid, nOut, pos, col);
+      const lg = new THREE.BufferGeometry();
+      if (connPos.length) {
+        lg.setAttribute('position', new THREE.Float32BufferAttribute(connPos, 3));
+        lg.setAttribute('color', new THREE.Float32BufferAttribute(connCol, 3));
+      }
+      g3.lines.geometry.dispose();
+      g3.lines.geometry = lg;
+    }
+    state._3d_dirty = false;
+  }
+
+  function refresh3dColors(state, config) {
+    const refs = g3.cellRefs;
+    if (!refs.length) return;
+    const nl = config.num_layers;
+    const geoms = [g3.ptsIn.geometry, g3.ptsHid.geometry, g3.ptsOut.geometry];
+    const starts = [0, g3.nIn, g3.nIn + g3.nHid];
+    const counts = [g3.nIn, g3.nHid, g3.nOut];
+    for (let g = 0; g < 3; g++) {
+      const attr = geoms[g].getAttribute('color');
+      if (!attr) continue;
+      const arr = attr.array;
+      let off = 0;
+      const base = starts[g];
+      for (let i = 0; i < counts[g]; i++) {
+        const ref = refs[base + i];
+        if (!ref) continue;
+        const [x, y, z] = ref;
+        const cell = state.cells[x][y][z];
+        const [r, gr, b] = cell ? layerColor(z, nl, cell.charge) : [0.1, 0.1, 0.1];
+        arr[off] = r; arr[off + 1] = gr; arr[off + 2] = b; off += 3;
+      }
+      attr.needsUpdate = true;
+    }
+  }
+
+  function apply3dCamera(state) {
+    const root = g3.root;
+    root.rotation.set(state.rotation_x * Math.PI / 180, state.rotation_y * Math.PI / 180, 0, 'YXZ');
+    root.position.z = state.zoom * 0.4;
+  }
+
+  function render3dNetwork(state, config) {
+    if (state._3d_dirty) rebuild3dCache(state, config);
+    refresh3dColors(state, config);
+    apply3dCamera(state);
+    while (g3.backpropGroup.children.length) g3.backpropGroup.remove(g3.backpropGroup.children[0]);
+    g3.renderer.render(g3.scene, g3.camera);
+    const hud = document.getElementById('hud3d');
+    hud.style.display = 'block';
+    hud.textContent = [
+      `Layers: ${config.num_layers} | Cells: ${g3.nIn + g3.nHid + g3.nOut}`,
+      `Cycle: ${state.training_cycles} | Correct: ${state.bingo_count}/${config.how_much_training_data}`,
+      `Loss: ${state.running_avg_loss.toFixed(4)} | Max: ${state.max_bingo_count}`,
+      `LR: ${config.learning_rate} | Dendrite: ${config.length_of_dendrite} | BackProp: ${state.back_prop}`,
+    ].join('\n');
+  }
+
+  function render3dBackprop(state, config, cz, cx, cy) {
+    if (state._3d_dirty) rebuild3dCache(state, config);
+    refresh3dColors(state, config);
+    apply3dCamera(state);
+    while (g3.backpropGroup.children.length) g3.backpropGroup.remove(g3.backpropGroup.children[0]);
+    const nl = config.num_layers, halfW = WIDTH / 2, halfH = HEIGHT / 2;
+    const z = cz * 2 - nl;
+    const px = cx - halfW, py = cy - halfH;
+    const cell = state.cells[cx][cy][cz];
+    if (!cell) { g3.renderer.render(g3.scene, g3.camera); return; }
+    const addPoints = (pts, cols, size) => {
+      if (!pts.length) return;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      const m = new THREE.PointsMaterial({ size, vertexColors: true, sizeAttenuation: true, depthTest: true });
+      g3.backpropGroup.add(new THREE.Points(g, m));
+    };
+    const addLines = (seg) => {
+      if (!seg.length) return;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(seg.length / 3).fill(1), 3));
+      const m = new THREE.LineBasicMaterial({ vertexColors: true });
+      g3.backpropGroup.add(new THREE.LineSegments(g, m));
+    };
+    const pHi = [], cHi = [];
+    pHi.push(px, py, z); cHi.push(1, 1, 0);
+    const reach = config.autonomous_network_genes ? cell.reach : config.length_of_dendrite;
+    if (cz > 0) {
+      for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) continue;
+        const u = state.cells[nx][ny][cz - 1]; if (!u) continue;
+        const ci = Math.min(Math.abs(u.charge), 1);
+        const zz = (cz - 1) * 2 - nl;
+        pHi.push(nx - halfW, ny - halfH, zz);
+        cHi.push(0.2, 0.5 + 0.5 * ci, 1);
+      }
+    }
+    addPoints(pHi, cHi, 10);
+    g3.renderer.render(g3.scene, g3.camera);
+  }
+
+  function main() {
+    const cv2d = document.getElementById('cv2d');
+    const cv3d = document.getElementById('cv3d');
+    const ctx2d = cv2d.getContext('2d');
+    const quickBar = document.getElementById('quickStartBar');
+    const sidePre = document.getElementById('sidePre');
+    const statusLines = document.getElementById('statusLines');
+    const pred = document.getElementById('pred').getContext('2d');
+    const modalMask = document.getElementById('modalMask');
+    const modalPrompt = document.getElementById('modalPrompt');
+    const modalInput = document.getElementById('modalInput');
+    let modalResolve = null;
+
+    function showModal(prompt, defVal) {
+      return new Promise((resolve) => {
+        modalPrompt.textContent = prompt;
+        modalInput.value = defVal != null ? String(defVal) : '';
+        modalMask.classList.add('on');
+        modalResolve = resolve;
+      });
+    }
+    document.getElementById('modalOk').onclick = () => { modalMask.classList.remove('on'); if (modalResolve) modalResolve(modalInput.value); modalResolve = null; };
+    document.getElementById('modalCancel').onclick = () => { modalMask.classList.remove('on'); if (modalResolve) modalResolve(null); modalResolve = null; };
+
+    const config = setDefaultValues();
+    const state = SimState();
+    Cell.setConfig(config);
+
+    const helpKeys = Object.keys(HELP_SCREEN);
+    let helpText = HELP_SCREEN.controls;
+    function drawHelpPanel() {
+      if (quickBar) quickBar.textContent = QUICK_START;
+      const log = state.side_panel_text.slice(-40).join('\n');
+      if (sidePre) {
+        sidePre.textContent = helpText + '\n\n--- Log ---\n' + log;
+      }
+    }
+    function uiPrint(text, position) {
+      if (state.show_3d_view) return;
+      if (position == null) {
+        const lines = String(text).split('\n');
+        state.side_panel_text.push(...lines);
+        state.side_panel_text = state.side_panel_text.slice(-50);
+      }
+      drawHelpPanel();
+    }
+
+    function doDraw2d() {
+      ctx2d.fillStyle = '#fff'; ctx2d.fillRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+      drawCells(state, config, ctx2d);
+      drawGrid(ctx2d);
+    }
+    // After M/J load: paint first sample so input (layer 0) and labels (last layer) are visible before T.
+    function showLoadedTrainingPreview() {
+      if (!state.training_data_layer_0.length) return;
+      applyLayerFromGrid(state.cells, 0, state.training_data_layer_0[0]);
+      applyLayerFromGrid(state.cells, config.num_layers - 1, state.training_data_num_layer_minus_1[0]);
+      state.invalidateNeighborCache();
+      if (!state.show_3d_view) doDraw2d();
+      else state._3d_dirty = true;
+    }
+    function doRenderBackprop(layer, pos) {
+      const [x, y] = pos;
+      render3dBackprop(state, config, layer, x, y);
+    }
+
+    init3d(cv3d);
+
+    function layout2d3d() {
+      if (state.show_3d_view) {
+        cv2d.style.display = 'none';
+        cv3d.style.display = 'block';
+      } else {
+        cv3d.style.display = 'none';
+        cv2d.style.display = 'block';
+        document.getElementById('hud3d').style.display = 'none';
+      }
+    }
+
+    let dragging = false, lastMx = 0, lastMy = 0;
+    cv3d.addEventListener('mousedown', (e) => { dragging = true; lastMx = e.clientX; lastMy = e.clientY; });
+    window.addEventListener('mouseup', () => { dragging = false; });
+    cv3d.addEventListener('mousemove', (e) => {
+      if (state.show_3d_view && dragging) {
+        state.rotation_y += (e.clientX - lastMx) * 0.5;
+        state.rotation_x += (e.clientY - lastMy) * 0.5;
+        lastMx = e.clientX; lastMy = e.clientY;
+      }
+    });
+    cv3d.addEventListener('wheel', (e) => { if (state.show_3d_view) { state.zoom += e.deltaY > 0 ? -0.5 : 0.5; e.preventDefault(); } }, { passive: false });
+
+    cv2d.addEventListener('mousedown', (e) => {
+      const [mx, my] = canvasPointerToInternal(cv2d, e.clientX, e.clientY);
+      const [cx, cy, layer] = convertXYToIndex(mx, my);
+      if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
+        const c = state.cells[cx][cy][layer];
+        if (c) {
+          const ct = updateCellTypes(state.cells, config);
+          const phen = updatePhenotypeCellTypes(state.cells, config);
+          const tc = phen[1], cp = phen[0];
+          uiPrint(`Cells ${tc} | Positive ${cp} | Fraction ${(cp / (tc + EPS)).toFixed(2)}`);
+          uiPrint(c.toString());
+        } else uiPrint('No cell at this location');
+        return;
+      }
+      if (e.button === 0) {
+        if (state.cells[cx][cy][layer] == null) {
+          state.cells[cx][cy][layer] = new Cell(layer, cx, cy, config.number_of_weights, config.bias_range, config.avg_weights_cell,
+            config.charge_delta, config.weight_decay, config.mutation_rate, null);
+        } else state.cells[cx][cy][layer] = null;
+        state.mouse_up = false; state.invalidateNeighborCache();
+        doDraw2d();
+      }
+    });
+    cv2d.addEventListener('mousemove', (e) => {
+      if (state.mouse_up || e.buttons !== 1) return;
+      const [mx, my] = canvasPointerToInternal(cv2d, e.clientX, e.clientY);
+      const [cx, cy, layer] = convertXYToIndex(mx, my);
+      if (state.cells[cx][cy][layer] == null) {
+        state.cells[cx][cy][layer] = new Cell(layer, cx, cy, config.number_of_weights, config.bias_range, config.avg_weights_cell,
+          config.charge_delta, config.weight_decay, config.mutation_rate, null);
+        state.invalidateNeighborCache();
+        doDraw2d();
+      }
+    });
+    cv2d.addEventListener('mouseup', () => { state.mouse_up = true; });
+    cv2d.addEventListener('contextmenu', (e) => e.preventDefault());
+    cv2d.addEventListener('click', () => { try { cv2d.focus(); } catch (_) {} });
+    cv3d.addEventListener('click', () => { try { cv3d.focus(); } catch (_) {} });
+    try { cv2d.focus(); } catch (_) {}
+
+    async function onKeyDown(e) {
+      const k = e.key;
+      if (k === '?' || (k === '/' && e.shiftKey)) {
+        if (quickBar) quickBar.scrollIntoView({ block: 'start' });
+        uiPrint('(See blue QUICK START panel above the help text.)');
+        drawHelpPanel();
+        return;
+      }
+      if (state.show_3d_view && k.toLowerCase() === 'h') { /* allow */ }
+      if (!state.show_3d_view && k.toLowerCase() === 'h') {
+        state.current_index = (state.current_index + 1) % helpKeys.length;
+        helpText = HELP_SCREEN[helpKeys[state.current_index]];
+        drawHelpPanel(); return;
+      }
+      if (k === ' ') { state.running = !state.running; return; }
+      if (k.toLowerCase() === 'u') {
+        config.autonomous_network_genes = !config.autonomous_network_genes;
+        uiPrint(`Autonomous network genes: ${config.autonomous_network_genes}`);
+        return;
+      }
+      if (k.toLowerCase() === 'p') { state.prune = !state.prune; return; }
+      if (k.toLowerCase() === 'o') { state.gradient_prune = !state.gradient_prune; return; }
+      if (k === '=' || k === '+') { state.prune_logic = state.prune_logic === 'AND' ? 'OR' : 'AND'; return; }
+      if (k.toLowerCase() === 'c' && !state.show_3d_view && state.charge_change_protection) {
+        const a = await showModal(`Charge delta (${config.charge_delta}):`, config.charge_delta);
+        const b = await showModal(`Gradient threshold (${config.gradient_threshold}):`, config.gradient_threshold);
+        if (a != null && !Number.isNaN(+a)) config.charge_delta = +a;
+        if (b != null && !Number.isNaN(+b)) config.gradient_threshold = +b;
+        return;
+      }
+      if (k.toLowerCase() === 'd') { state.display_updating = !state.display_updating; return; }
+      if (k.toLowerCase() === 'i') {
+        const v = await showModal(`Learning rate (${config.learning_rate}):`, config.learning_rate);
+        if (v != null && !Number.isNaN(+v)) config.learning_rate = +v;
+        return;
+      }
+      if (k.toLowerCase() === 'f') { state.direction_of_charge_flow = '+++++>>>>>'; return; }
+      if (k.toLowerCase() === 'r') { state.direction_of_charge_flow = '<<<<<-----'; return; }
+      if (k.toLowerCase() === 'b') { state.back_prop = !state.back_prop; return; }
+      if (k.toLowerCase() === 'a') { state.andromida_mode = !state.andromida_mode; return; }
+      if (k.toLowerCase() === 'w') { resetAllGradientChanges(state, config); return; }
+      if (k.toLowerCase() === 'g' && !state.show_3d_view) { state.display = state.display === 'genes' ? 'proteins' : 'genes'; return; }
+      if (k.toLowerCase() === 'q' && !state.show_3d_view) { uiPrint(formatTelemetry(computeTelemetry(state, config)), 10); return; }
+      if (k === '3') {
+        state.show_3d_view = !state.show_3d_view; state._3d_dirty = true; layout2d3d(); return;
+      }
+      if (k === '4') {
+        state.show_backprop_view = !state.show_backprop_view;
+        if (state.show_backprop_view) { state.show_3d_view = true; layout2d3d(); }
+        state._3d_dirty = true; return;
+      }
+      if (k.toLowerCase() === 't') {
+        if (!state.training_data_loaded) uiPrint('Load training data first (M)');
+        else {
+          state.training_mode = !state.training_mode;
+          state._training_sample_i = state.training_mode ? 0 : null;
+        }
+        return;
+      }
+      if (k.toLowerCase() === 'm' && !state.show_3d_view) {
+        const ds = await showModal(
+          'Load training data\n\n'
+          + 'Type J + OK = choose mnist_training_web.json (from mnist_to_neurosim_web_json.py)\n'
+          + 'Type M + OK = synthetic random images (no file)\n\n'
+          + 'Enter J or M:',
+          'J'
+        );
+        if ((ds || '').toLowerCase() === 'f') uiPrint(FASHION_LABELS);
+        const n = await showModal('How many samples per training cycle? (must be ≤ rows in JSON file, e.g. 500)', config.how_much_training_data);
+        const st = await showModal('Start index into dataset (usually 0):', config.start_index);
+        let ns = n != null && !Number.isNaN(+n) ? Math.max(1, (+n) | 0) : config.how_much_training_data;
+        const ss = st != null && !Number.isNaN(+st) ? Math.max(0, (+st) | 0) : 0;
+        if (ss + ns > 5000) uiPrint('Total exceeds 5000 — cancelled');
+        else {
+          config.start_index = ss;
+          state.training_data_layer_0 = [];
+          state.training_data_num_layer_minus_1 = [];
+          if ((ds || 'm').toLowerCase() === 'j') {
+            uiPrint('Select your .json file in the chooser (must contain "samples" array).');
+            await new Promise((res) => {
+              const fp = document.getElementById('filePick');
+              fp.onchange = () => {
+                const f = fp.files[0];
+                fp.value = '';
+                if (!f) { res(); return; }
+                const fr = new FileReader();
+                fr.onload = () => {
+                  try {
+                    const obj = JSON.parse(fr.result);
+                    const ar = obj.samples != null ? obj.samples : (Array.isArray(obj) ? obj : null);
+                    if (!Array.isArray(ar) || !ar.length) {
+                      uiPrint('JSON needs { "samples": [ { "layer0": [...], "layerLast": [...] }, ... ] }');
+                      res();
+                      return;
+                    }
+                    const fromFile = ar.length - ss;
+                    const nUse = Math.max(0, Math.min(ns, fromFile));
+                    if (nUse === 0) {
+                      uiPrint(`No samples for start_index=${ss} (file has ${ar.length} samples).`);
+                      res();
+                      return;
+                    }
+                    for (let i = 0; i < nUse; i++) {
+                      const row = ar[ss + i];
+                      if (!row || !row.layer0 || !row.layerLast) {
+                        uiPrint(`Bad sample at index ${ss + i}; need layer0 + layerLast`);
+                        continue;
+                      }
+                      state.training_data_layer_0.push(row.layer0);
+                      state.training_data_num_layer_minus_1.push(row.layerLast);
+                    }
+                    if (state.training_data_layer_0.length === 0) {
+                      uiPrint('No valid samples loaded.');
+                      res();
+                      return;
+                    }
+                    config.how_much_training_data = state.training_data_layer_0.length;
+                    state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
+                    state.training_data_loaded = true;
+                    state.reset_training_metrics();
+                    state._training_sample_i = null;
+                    showLoadedTrainingPreview();
+                    uiPrint(`Loaded ${state.training_data_layer_0.length} samples (start ${ss}). First sample on grid. Press T to train.`);
+                    if (nUse < ns) uiPrint(`Note: only ${nUse} available from index ${ss} (you asked ${ns}).`);
+                  } catch (err) { uiPrint('JSON error: ' + err); }
+                  res();
+                };
+                fr.readAsText(f);
+              };
+              fp.click();
+            });
+          } else {
+            config.how_much_training_data = ns;
+            for (let i = 0; i < config.how_much_training_data; i++) {
+              const pair = buildSyntheticTraining(config);
+              state.training_data_layer_0.push(pair.layer0.map(row => row.map(c => c ? c.toJSON() : null)));
+              state.training_data_num_layer_minus_1.push(pair.layerLast.map(row => row.map(c => c ? c.toJSON() : null)));
+            }
+            state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
+            state.training_data_loaded = true;
+            state.reset_training_metrics();
+            state._training_sample_i = null;
+            showLoadedTrainingPreview();
+            uiPrint(`Synthetic training: ${state.training_data_layer_0.length} samples. First sample on grid. Press T to train.`);
+          }
+        }
+        return;
+      }
+      if (k.toLowerCase() === 'e') {
+        const nl = await showModal(`num_layers (4-16):`, config.num_layers);
+        const ld = await showModal(`dendrite length:`, config.length_of_dendrite);
+        if (nl != null) config.num_layers = clip(+nl | 0, 4, 16);
+        if (ld != null) config.length_of_dendrite = clip(+ld | 0, 1, 4);
+        config.mutation_rate = +(await showModal('mutation_rate:', config.mutation_rate) ?? config.mutation_rate);
+        config.lower_allele_range = +(await showModal('lower_allele:', config.lower_allele_range) ?? config.lower_allele_range);
+        config.upper_allele_range = +(await showModal('upper_allele:', config.upper_allele_range) ?? config.upper_allele_range);
+        config.weight_change_threshold = +(await showModal('weight_change_threshold:', config.weight_change_threshold) ?? config.weight_change_threshold);
+        config.avg_weights_cell = +(await showModal('avg_weights_cell:', config.avg_weights_cell) ?? config.avg_weights_cell);
+        config.weight_decay = +(await showModal('weight_decay:', config.weight_decay) ?? config.weight_decay);
+        config.bias_range = +(await showModal('bias_range:', config.bias_range) ?? config.bias_range);
+        config.learning_rate = +(await showModal('learning_rate:', config.learning_rate) ?? config.learning_rate);
+        config.charge_delta = +(await showModal('charge_delta:', config.charge_delta) ?? config.charge_delta);
+        config.gradient_threshold = +(await showModal('gradient_threshold:', config.gradient_threshold) ?? config.gradient_threshold);
+        config.activation_slope = +(await showModal('activation_slope:', config.activation_slope) ?? config.activation_slope);
+        config.updateDerived();
+        for (let z = 1; z < config.num_layers - 1; z++)
+          for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+            const c = state.cells[x][y][z];
+            if (c) c.remapWeights(config.length_of_dendrite);
+          }
+        state.invalidateNeighborCache();
+        uiPrint(`Updated dendrite=${config.length_of_dendrite} weights=${config.number_of_weights}`);
+        return;
+      }
+      if (k.toLowerCase() === 'x') {
+        for (let z = 1; z < config.num_layers - 1; z++)
+          for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+            const c = state.cells[x][y][z];
+            if (c) {
+              c.initalizeNetworkGenes(config.number_of_weights, config.bias_range, config.avg_weights_cell,
+                config.charge_delta, config.weight_decay, config.mutation_rate, state.cells);
+              c.colorGenes(); c.initializeNetworkProteins(); c.colorProteins();
+            }
+          }
+        state.not_saved_yet = true; state.reset_training_metrics();
+        return;
+      }
+      if (k.toLowerCase() === 'n') {
+        const ok = await showModal('Nuke hidden layers? y/n', 'n');
+        if ((ok || '').toLowerCase() === 'y') {
+          for (let z = 1; z < config.num_layers - 1; z++)
+            for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) state.cells[x][y][z] = null;
+          state.invalidateNeighborCache(); state.reset_training_metrics();
+        }
+        return;
+      }
+      if (k.toLowerCase() === 's') {
+        const payload = { version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles };
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `neurosim_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        state.not_saved_yet = false;
+        uiPrint('Saved JSON (download started)');
+        return;
+      }
+      if (k.toLowerCase() === 'l' && !state.show_3d_view) {
+        await new Promise((res) => {
+          const fp = document.getElementById('filePick');
+          fp.onchange = () => {
+            const f = fp.files[0];
+            if (!f) { res(); return; }
+            const fr = new FileReader();
+            fr.onload = () => {
+              try {
+                const obj = JSON.parse(fr.result);
+                Object.assign(config, configFromJSON(obj.config));
+                Cell.setConfig(config);
+                state.cells = deserializeCells(obj.cells, config);
+                state.training_cycles = obj.training_cycles || 0;
+                state.invalidateNeighborCache();
+                uiPrint('Loaded JSON state');
+              } catch (err) { uiPrint('Load error: ' + err); }
+              res();
+            };
+            fr.readAsText(f);
+          };
+          fp.click();
+        });
+        return;
+      }
+      if (k.toLowerCase() === 'v' && !state.show_3d_view) {
+        state.display_set = (state.display_set + 1) % 3;
+        if (state.display_set === 0) helpText = getAllSettings(state, config);
+        else if (state.display_set === 1) displayAverages(state, config, uiPrint);
+        else {
+          const ct = updateCellTypes(state.cells, config);
+          const pt = updatePhenotypeCellTypes(state.cells, config);
+          displayStatistics(ct, uiPrint);
+          displayPhenotypeStatistics(pt, uiPrint);
+          displayMaxChargeDiff(state, config, 5, uiPrint);
+        }
+        state.show_training_stats = !state.show_training_stats;
+        drawHelpPanel();
+        return;
+      }
+    }
+    window.addEventListener('keydown', (e) => { onKeyDown(e); });
+
+    let startT = performance.now();
+    function tick() {
+      requestAnimationFrame(tick);
+      if (state.running) updateCells(state, config);
+      if (state.training_mode) {
+        const setSize = config.how_much_training_data;
+        const renderBp = state.show_3d_view && state.show_backprop_view ? doRenderBackprop : null;
+        try {
+          if (state.display_updating) {
+            /* One sample per rAF so the browser paints each MNIST image; full loop in one tick only updates the last digit. */
+            if (state._training_sample_i == null) state._training_sample_i = 0;
+            if (state._training_sample_i === 0) {
+              state.total_loss = 0;
+              state.total_predictions = 0;
+              state.bingo_count = 0;
+              state.training_cycles++;
+            }
+            const i = state._training_sample_i;
+            trainOnSample(state, config, i, renderBp);
+            if (!state.show_3d_view) doDraw2d();
+            else state._3d_dirty = true;
+            if (state.training_mode && state.display_updating) predictionPlot(state, pred);
+            state._training_sample_i++;
+            if (state._training_sample_i >= setSize) {
+              state._training_sample_i = 0;
+              if (state.show_training_stats && state.training_cycles % state.stats_update_frequency === 0) {
+                updateTrainingStats(state, config);
+                displayTrainingStats(state, uiPrint);
+              }
+            }
+          } else {
+            state._training_sample_i = 0;
+            state.total_loss = 0;
+            state.total_predictions = 0;
+            state.training_cycles++;
+            training(state, config, null, renderBp);
+            state._3d_dirty = true;
+            if (state.show_training_stats && state.training_cycles % state.stats_update_frequency === 0) {
+              updateTrainingStats(state, config);
+              displayTrainingStats(state, uiPrint);
+            }
+          }
+        } catch (err) { console.error(err); uiPrint('Training error: ' + err); }
+        state._3d_dirty = true;
+      }
+      if (state.display_updating) {
+        if (state.show_3d_view) {
+          if (!state.show_backprop_view) render3dNetwork(state, config);
+        } else {
+          doDraw2d();
+        }
+      }
+      const now = performance.now();
+      const elapsed = (now - startT) / 1000;
+      startT = now;
+      const col = state.running ? '#0f0' : '#fff';
+      statusLines.innerHTML = `<span style="color:${col}">Run=${state.running} And=${state.andromida_mode} Prune=${state.prune} ${state.prune_logic} | ` +
+        `Train=${state.training_mode} LR=${config.learning_rate.toFixed(4)} | AutoG=${config.autonomous_network_genes}</span><br/>` +
+        `Dir=${state.direction_of_charge_flow} BackP=${state.back_prop} | t=${elapsed.toFixed(2)}s | ` +
+        `Loss=${state.running_avg_loss.toFixed(4)} Bingo=${state.bingo_count} Max=${state.max_bingo_count}`;
+      if (!state.training_mode && !state.show_3d_view) pred.fillRect(0, 0, pred.canvas.width, pred.canvas.height);
+    }
+
+    drawHelpPanel();
+    doDraw2d();
+    tick();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main);
+  else main();
+})();
+
+</script>
+</body>
+</html>
