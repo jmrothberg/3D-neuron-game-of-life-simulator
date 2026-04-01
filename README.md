@@ -426,13 +426,17 @@ MNIST and Fashion-MNIST data must be preprocessed into per-image pickle files. S
 
 ## Browser port (single-file HTML)
 
-Regenerate the standalone page (inline script + full help text from `get_help_defs.py`) with:
+**Status:** The HTML/JS simulator is a **work in progress**. It is meant to mirror the desktop `neurosim/` behavior and share the same help text, but there are intentional and accidental differences (see parity notes below). Prefer the Python entry point for research runs and for anything that must match the shipped desktop build exactly.
+
+**Why `build_neurosim_web.py`?** The editable simulation logic lives in `neurosim_web.js`. The build script generates **`neurosim_web.html`** as a **single file** you can open without a local server: it reads `neurosim_web.js`, pulls the long help strings from `get_help_defs.py` (same source as the desktop **H** screens), injects them as a `HELP_SCREEN` JSON object, and inlines the full script. That way help and UI code stay in sync when you re-run the builder instead of copying text by hand. If you change only `neurosim_web.js`, run the build again before relying on the HTML file. You can also wire up your own page that loads `neurosim_web.js` externally and defines `HELP_SCREEN` yourself; the builder is optional but recommended for the checked-in standalone page.
+
+Regenerate the standalone page with:
 
 ```bash
 python3 build_neurosim_web.py
 ```
 
-Open `neurosim_web.html` in a browser (network needed once for the Three.js CDN). Saves/loads simulation state as **JSON** (not Python pickle). Training: press **M** for synthetic mini-batches or choose **J** and pick a JSON file with `samples: [{ layer0, layerLast }, ...]` (each a 28×28 grid of cell objects or nulls, same shape as the desktop tensor). Source for the inlined script is `neurosim_web.js`.
+Open `neurosim_web.html` in a browser (network needed once for the Three.js CDN). Saves/loads simulation state as **JSON** (not Python pickle). Training: press **M** for synthetic mini-batches or choose **J** and pick a JSON file with `samples: [{ layer0, layerLast }, ...]` (each a 28×28 grid of cell objects or nulls, same shape as the desktop tensor).
 
 **MNIST / Fashion-MNIST → web JSON** (downloads official IDX gzip URLs, stdlib only):
 
