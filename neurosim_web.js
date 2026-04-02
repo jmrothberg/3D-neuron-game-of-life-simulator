@@ -58,7 +58,8 @@
     '    creates ./mnist_training_web.json in THAT terminal current directory (check pwd).',
     '    In the file picker, navigate to that same folder and pick the .json.',
     '',
-    '1) Click the big white grid once (keyboard focus). Press ? = jump help to top; H = next help section.',
+    '1) Click the big white grid once (keyboard focus). Press ? = jump help to top; H = next README ## section.',
+    '   Full manual is the README below. Key E = 13 parameter prompts; activation_slope = leaky ReLU slope (see README “Key E”).',
     '',
     '2) Paint hidden neurons (layers 1 … N-2): LEFT-CLICK or CLICK-DRAG on the 16 small',
     '   quadrant squares. Layer 0 (input) and last layer (targets) come from training data.',
@@ -345,8 +346,8 @@
         this.genes[3] = mr; this.genes[4] = wpc | 0; this.genes[5] = br; this.genes[6] = aw;
         this.genes[7] = cd; this.genes[8] = wd;
         this.genes[9] = cfg ? cfg.learning_rate : 0.01;
-        this.genes[10] = cfg ? cfg.gradient_threshold : 1e-7;
-        this.genes[11] = cfg ? cfg.activation_slope : 0.1;
+        this.genes[10] = cfg ? cfg.gradient_threshold : 1e-4;
+        this.genes[11] = cfg ? cfg.activation_slope : 0.01;
         this.genes[12] = cfg ? cfg.weight_prune_threshold : 0.01;
         this.genes[13] = cfg ? cfg.min_contribution_score : 0;
       } else {
@@ -459,12 +460,12 @@
     }
     relu(x) {
       const cfg = CellConfig;
-      const s = (cfg && cfg.autonomous_network_genes) ? this.genes[11] : (cfg ? cfg.activation_slope : 0.1);
+      const s = (cfg && cfg.autonomous_network_genes) ? this.genes[11] : (cfg ? cfg.activation_slope : 0.01);
       return x > 0 ? x : s * x;
     }
     reluDerivative(x) {
       const cfg = CellConfig;
-      const s = (cfg && cfg.autonomous_network_genes) ? this.genes[11] : (cfg ? cfg.activation_slope : 0.1);
+      const s = (cfg && cfg.autonomous_network_genes) ? this.genes[11] : (cfg ? cfg.activation_slope : 0.01);
       return x > 0 ? 1 : s;
     }
     getUpperLayerCells(cells, reach) {
@@ -717,7 +718,7 @@
       const cfg = CellConfig;
       /* Gradient prune (O key): compare live avg_gradient_magnitude against threshold */
       if (gp) {
-        const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-7);
+        const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-4);
         if (this.avg_gradient_magnitude <= gt) return true;
       }
       /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta.
@@ -2264,10 +2265,19 @@
       if (r > 0) return 'J';
       return 'N';
     }
-    /** tag e.g. '' or '-perfect' — filename starts with accuracy letter + dataset letter (e.g. PM = perfect MNIST). */
+    /** Build a compact filename: saved_N_980_1000_L8W9_250402_045.json
+     *  N/F = dataset, maxCorrect_epochSize, L=layers W=weights, YYMMDD, 3-digit ms. */
     function downloadSimulationJson(tag) {
-      const g = saveFilenameAccuracyLetter(state.max_bingo_count, config.how_much_training_data);
       const d = /^[A-Z]$/i.test(state.training_dataset_code || '') ? String(state.training_dataset_code).toUpperCase() : 'X';
+      // N for number-MNIST, keep F for Fashion, others as-is
+      const dLetter = (d === 'M') ? 'N' : d;
+      const maxC = state.max_bingo_count || 0;
+      const epSz = config.how_much_training_data || 0;
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(-2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const ms3 = String(now.getMilliseconds()).padStart(3, '0');
       const payload = {
         version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles,
         training_dataset_code: d, max_bingo_count: state.max_bingo_count, bingo_count: state.bingo_count,
@@ -2275,9 +2285,8 @@
       const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      const ts = Date.now();
-      const core = `${g}${d}_${config.num_layers}_${config.number_of_weights}_${state.bingo_count}_${config.how_much_training_data}`;
-      const fname = tag ? `neurosim_${core}${tag}_${ts}.json` : `neurosim_${core}_${ts}.json`;
+      const core = `saved_${dLetter}_${maxC}_${epSz}_L${config.num_layers}W${config.number_of_weights}_${yy}${mm}${dd}_${ms3}`;
+      const fname = tag ? `${core}${tag}.json` : `${core}.json`;
       a.download = fname;
       a.click();
       URL.revokeObjectURL(a.href);
@@ -2664,7 +2673,7 @@
       if (k.toLowerCase() === 's') {
         const fn = downloadSimulationJson('');
         state.not_saved_yet = false;
-        uiPrint('Saved ' + fn + '  (1st letter=epoch max correct tier P..N, 2nd=M/F/S/U/X dataset)');
+        uiPrint('Saved ' + fn + '  (N=numbers F=fashion, maxCorrect_epoch, L=layers W=weights, YYMMDD, ms)');
         return;
       }
       if (k.toLowerCase() === 'l' && !state.show_3d_view) {
@@ -2792,9 +2801,9 @@
         ? ` (${state._training_sample_i}/${config.how_much_training_data})`
         : '';
       const K = Math.max(1, config.gradient_minibatch_size | 0);
-      statusLines.innerHTML = `<span style="color:${col}">Run=${state.running} And=${state.andromida_mode} Prune=${state.prune} ${state.prune_logic} | ` +
-        `Train=${state.training_mode} LR=${config.learning_rate.toFixed(4)} | AutoG=${config.autonomous_network_genes}</span><br/>` +
-        `Dir=${state.direction_of_charge_flow} BackP=${state.back_prop} Disp=${state.display_updating} | ` +
+      statusLines.innerHTML = `<span style="color:${col}">Run=${state.running} Andromida=${state.andromida_mode} Prune=${state.prune} ${state.prune_logic} | ` +
+        `Train=${state.training_mode} LR=${config.learning_rate.toFixed(4)} | CellAutonomous(4-13)=${config.autonomous_network_genes}</span><br/>` +
+        `Dir=${state.direction_of_charge_flow} BackProp=${state.back_prop} Display=${state.display_updating} | ` +
         `Epoch=${state.training_cycles}${epochProgress} Samples=${config.how_much_training_data} K=${K} | ` +
         `EpochLoss=${lastEpochLoss} BatchLoss=${lastMinibatchLoss} | Correct=${state.bingo_count}/${config.how_much_training_data} Max=${state.max_bingo_count}`;
       /* When training stops, keep the last loss graphs visible (don't blank them).

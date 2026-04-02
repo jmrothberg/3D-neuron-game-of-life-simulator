@@ -61,20 +61,20 @@ So: **alleles supply architecture, initial scales, update rules, and threshold l
 
 **1. Long-term memory — stored directly in proteins**
 
-| Protein | What is “remembered” |
-|---------|----------------------|
-| **Weights** | Learned connection strengths; they persist and accumulate changes across samples. This is the main **synaptic memory** of the cell. |
-| **Bias** | Learned resting offset; also persistent across samples. |
+| Protein | What is “remembered” | Init range | Typical trained range |
+|---------|----------------------|------------|----------------------|
+| **Weights** (`weights[]`) | Learned connection strengths; persist and accumulate across samples. Main **synaptic memory**. | He-scaled: randn × √(2/fan_in), clipped [−1, 1] | −2 to 2 (weight decay pulls toward 0) |
+| **Bias** | Learned resting offset; persistent across samples. | uniform(−gene 5, +gene 5); default ±0.01 | −0.5 to 0.5 typically |
 
 Together, **weights** and **bias** are where the network’s **learned mapping** actually lives.
 
 **2. Fast signaling — proteins that change every step (not “storage” in the archival sense)**
 
-| Protein | Role |
-|---------|------|
-| **Charge** | Current activation after this forward pass — a **snapshot**, overwritten in meaning on the next image. |
-| **Error** | Current backprop signal for this step. |
-| **Gradient** | Immediate direction of plasticity for each weight slot this step. |
+| Protein | Role | Init | Runtime range |
+|---------|------|------|---------------|
+| **Charge** | Current activation after forward pass — a **snapshot**, overwritten on the next image. | 0 (hidden/output); random (input) | Hard-clipped [−10, 10]; typically −1 to 1 after leaky ReLU |
+| **Error** | Current backprop signal for this step. | ε (1e-15) | Hard-clipped [−10, 10]; typically small |
+| **Gradient** | Immediate direction of plasticity for each weight slot this step. | 0 | Clipped to ±gradient_clip (default ±0.5) |
 
 These are essential for learning, but they are **not** where the cell keeps a running record of the whole epoch by themselves.
 
@@ -109,22 +109,52 @@ Genes 3–8 control **network structure and regularization**.
 Genes 9–11 control **learning dynamics**.
 Genes 12–13 control **pruning sensitivity**.
 
-| Gene | Name | Symbol | Controls | Default (non-autonomous) | Autonomous Range | Biological Analogy |
-|------|------|--------|----------|--------------------------|------------------|--------------------|
-| **0** | Overcrowding Tolerance | OT | Max alive neighbors before cell dies | 2–15 (random) | 2–15 (random) | Apoptosis from contact inhibition |
-| **1** | Isolation Tolerance | IT | Min alive neighbors before cell dies | 2–15 (≤ gene 0) | 2–15 (≤ gene 0) | Death from lack of trophic factors |
-| **2** | Birth Threshold | BT | Exact neighbor count to reproduce | 2–15 (random) | 2–15 (random) | Morphogen concentration for mitosis |
-| **3** | Mutation Rate | MR | Probability of gene mutation (germline and somatic) | From config (10) | 0–99 (random) | DNA repair fidelity |
-| **4** | Dendrite Size | WG | Number of synaptic weights | From config (9) | 9 or 25 or 49 | Dendritic arbor complexity |
-| **5** | Bias Range | BR | Initial bias magnitude | From config (0.01) | 0.001 or 0.01 | Resting membrane potential range |
-| **6** | Fan-In | AW | Weight initialization scaling (He) | From config (5) | Count of connected upstream cells | Synaptic normalization factor |
-| **7** | Charge Delta | CD | Threshold for "significant" activity | From config (0.01) | 10^uniform(−6,−2) | Activity-dependent survival signal |
-| **8** | Weight Decay | WD | L2 regularization strength | From config (1e-5) | 10^uniform(−6,−4) | Synaptic protein turnover rate |
-| **9** | Learning Rate | LR | Synaptic plasticity speed | From config (0.01) | uniform(0.003, 0.05) | Hippocampal vs cortical plasticity |
-| **10** | Gradient Threshold | GT | Gradient-pruning survival threshold | From config (1e-4) | 10^uniform(−8,−4) | Neurotrophic factor receptor density |
-| **11** | Activation Slope | AS | Leaky ReLU negative slope | From config (0.01) | uniform(0.01, 0.3) | Neuron selectivity / response curve |
-| **12** | Weight Prune Threshold | WPT | Min max-\|weight\| to survive pruning | From config (0.01) | 10^uniform(−3,−1) | Synaptic maintenance threshold |
-| **13** | Min Contribution Score | MCS | Min contribution score to survive | From config (0, off) | 10^uniform(−6,−2) | Activity-dependent trophic requirement |
+| Gene | Name | Sym | Allele range (autonomous) | Non-auto default | What the allele controls at runtime | Bio analogy |
+|------|------|-----|---------------------------|------------------|-------------------------------------|-------------|
+| **0** | Overcrowding | OT | integer 2–15 | 2–15 (random) | Cell dies if alive-neighbor count ≥ OT | Contact-inhibition apoptosis |
+| **1** | Isolation | IT | integer 2–15 (≤ gene 0) | 2–15 (≤ gene 0) | Cell dies if alive-neighbor count ≤ IT | Trophic-factor starvation |
+| **2** | Birth | BT | integer 2–15 | 2–15 (random) | Empty site gets a child when neighbor count = BT | Morphogen threshold for mitosis |
+| **3** | Mutation Rate | MR | integer 0–99 | config (10) | Germline: MR/1000 per birth; somatic: MR/100 000 per step | DNA-repair fidelity |
+| **4** | Dendrite Size | WG | 9, 25, or 49 | config (9) | Creates `weights[WG]` → sets the **number of synaptic weight proteins** | Dendritic arbor size |
+| **5** | Bias Range | BR | 0.001 or 0.01 | config (0.01) | Bias protein initialized to uniform(−BR, +BR) | Resting membrane potential |
+| **6** | Fan-In | AW | upstream cell count | config (5) | He scale = √(2/AW) → sets **initial weight magnitude** | Synaptic normalization |
+| **7** | Charge Delta | CD | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (0.01) | Pruning: cell survives only if max charge swing > CD. Also sets "significant charge" sticky flag. | Activity-dependent survival |
+| **8** | Weight Decay | WD | 10^uniform(−6,−4) → 1e-6 … 1e-4 | config (1e-5) | Each update: `weight -= LR×grad + WD×weight` → **weight proteins shrink** toward 0 | Synaptic protein turnover |
+| **9** | Learning Rate | LR | uniform(0.003, 0.05) | config (0.01) | Step size: `weight -= LR×grad` → controls **how fast weight and bias proteins change** | Hippocampal vs cortical plasticity |
+| **10** | Gradient Thresh | GT | 10^uniform(−8,−4) → 1e-8 … 1e-4 | config (1e-4) | Pruning: cell dies if avg \|gradient protein\| ≤ GT | Neurotrophic receptor density |
+| **11** | Activation Slope | AS | uniform(0.01, 0.3) | config (0.01) | Leaky ReLU: if pre-activation ≤ 0, charge = AS × pre-activation → **shapes the charge protein** | Ion-channel selectivity |
+| **12** | Weight Prune Thresh | WPT | 10^uniform(−3,−1) → 0.001 … 0.1 | config (0.01) | Pruning: cell dies if max \|weight protein\| < WPT | Synaptic maintenance threshold |
+| **13** | Min Contribution | MCS | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (0, off) | Pruning: cell dies if contributionScore < MCS (score = charge_diff × gradient) | Activity-dependent trophic need |
+
+**How to read this table:** The "allele range" column shows the space of possible values a gene can take in autonomous mode. The "what the allele controls" column shows exactly which **protein or decision** the allele value feeds into at runtime — this is the gene→protein link.
+
+#### The Cell Chromosome
+
+Every cell carries a single chromosome of 14 genes, organized in four functional regions:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          CELL CHROMOSOME  (14 genes)                                │
+├───────────────┬──────────────────────────┬───────────────────┬──────────────────────┤
+│  BREEDING     │  NETWORK STRUCTURE       │  LEARNING         │  PRUNING SENSITIVITY │
+│  (survival)   │  (anatomy & wiring)      │  (plasticity)     │  (trophic thresholds)│
+├───┬───┬───┬───┼───┬───┬───┬───┬───┬──────┼───┬───┬──────────┼───┬──────────────────┤
+│ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │      │ 9 │10 │ 11       │12 │ 13               │
+│OT │IT │BT │MR │WG │BR │AW │CD │WD │      │LR │GT │ AS       │WPT│ MCS              │
+├───┴───┴───┴───┼───┴───┴───┴───┴───┴──────┼───┴───┴──────────┼───┴──────────────────┤
+│ When does the │ How big are my dendrites │ How fast do I     │ How hard must I work │
+│ cell live,    │ and how are weights      │ learn, and what   │ to stay alive?       │
+│ die, or       │ seeded? How fast do      │ is my response    │ Thresholds compared  │
+│ reproduce?    │ weights decay?           │ curve shape       │ against my proteins  │
+│               │                          │ (slope=gene 11).  │ and cell memory.     │
+└───────────────┴──────────────────────────┴───────────────────┴──────────────────────┘
+     Always           Non-autonomous:             Non-autonomous:       Non-autonomous:
+     per-cell         from global config          from global config    from global config
+                      Autonomous (U on):          Autonomous (U on):    Autonomous (U on):
+                      evolved per-cell             evolved per-cell      evolved per-cell
+```
+
+**Reading the chromosome:** Gene 0 (leftmost) through gene 13 (rightmost). Breeding genes are always per-cell. Genes 3–13 can be globally configured (U off) or independently evolved (U on). In autonomous mode, offspring inherit genes from two parents via crossover, with germline mutation controlled by gene 3.
 
 #### Gene Groups Explained
 
@@ -132,7 +162,7 @@ Genes 12–13 control **pruning sensitivity**.
 
 **Genes 3–8 (Network Structure):** Define the physical architecture of each cell — how many dendrites it has, how weights are initialized and decay, and the threshold for "significant" charge activity.
 
-**Genes 9–11 (Learning Dynamics):** Control how each cell learns. Gene 9 (Learning Rate) is the single most impactful gene — in autonomous mode, evolution can discover that deep-layer cells should learn slowly while output cells learn fast. Gene 11 (Activation Slope) controls neuron selectivity: low slope (0.01) = highly selective, suppresses negative signals; high slope (0.3) = permissive, passes more signal through.
+**Genes 9–11 (Learning Dynamics):** Control how each cell learns. Gene 9 (Learning Rate) is the single most impactful gene — in autonomous mode, evolution can discover that deep-layer cells should learn slowly while output cells learn fast. **Gene 11 (Activation Slope)** is the cell's response curve — it sets the leaky ReLU negative slope, controlling how much negative signal passes through. Low slope (0.01) = highly selective, suppresses negative signals; high slope (0.3) = permissive, passes more signal through. It is a gene (fixed at birth), not a protein, because it defines what *type* of neuron this is — analogous to which ion channels the cell expresses during development.
 
 **Genes 12–13 (Pruning Sensitivity):** These genes put pruning thresholds *inside* the cell. In non-autonomous mode, all cells share the same global values from config. In autonomous mode, each cell evolves its own sensitivity — cells can become more or less resilient to pruning pressure through natural selection. This is analogous to cells expressing different levels of trophic factor receptors: a cell with a low MCS (gene 13) is "easy to satisfy" and survives with minimal contribution, while a cell with a high MCS is under stronger pressure to contribute or die.
 
@@ -217,20 +247,22 @@ The `U` key toggles `autonomous_network_genes`:
 - **Off (default):** All cells share the same network gene values from global config. Pruning decisions for charge delta, gradient threshold, weight prune threshold, and min contribution score read from **config** at decision time — so changing values via **E** or **C** takes effect immediately on all cells without rewriting each cell's gene snapshot. This is like training a traditional network — uniform architecture and hyperparameters.
 - **On:** Each cell has its own random gene values, subject to evolution. Pruning reads from the per-cell gene values. This is the bio-inspired mode — cells evolve independently, producing a heterogeneous network.
 
-| Gene | Autonomous Off | Autonomous On |
-|------|---------------|---------------|
-| 0–2 (breeding) | Always per-cell | Always per-cell |
-| 3 (mutation rate) | Same for all cells | Random per cell (0–99) |
-| 4 (dendrite size) | Same for all cells | Random: 9, 25, or 49 |
-| 5 (bias range) | Same for all cells | 0.001 or 0.01 |
-| 6 (fan-in) | Same for all cells | Measured per cell |
-| 7 (charge delta) | Config value used for pruning | Per-cell: log-uniform 1e-6 to 1e-2 |
-| 8 (weight decay) | Same for all cells | Log-uniform 1e-6 to 1e-4 |
-| 9 (learning rate) | Same for all cells | Uniform 0.003–0.05 |
-| 10 (gradient threshold) | Config value used for pruning | Log-uniform 1e-8 to 1e-4 |
-| 11 (activation slope) | Same for all cells | Uniform 0.01–0.3 |
-| 12 (weight prune threshold) | Config value used for pruning | Log-uniform 1e-3 to 1e-1 |
-| 13 (min contribution score) | Config value used for pruning | Log-uniform 1e-6 to 1e-2 |
+| Gene | Autonomous Off (U off) | Autonomous On (U on) |
+|------|------------------------|----------------------|
+| 0–2 (breeding) | Always per-cell (random at birth) | Always per-cell (random at birth) |
+| 3 (mutation rate) | From config; same for all cells | Random per cell: 0–99 |
+| 4 (dendrite size) | From config; same for all cells | Random: 9, 25, or 49 weights |
+| 5 (bias range) | From config; same for all cells | Random: 0.001 or 0.01 |
+| 6 (fan-in) | From config; same for all cells | Measured per cell from actual connections |
+| 7 (charge delta) | **Config value at runtime** (E/C changes apply immediately to all cells) | Per-cell gene: 10^uniform(−6,−2) |
+| 8 (weight decay) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: 10^uniform(−6,−4) |
+| 9 (learning rate) | **Config value at runtime** (E/I changes apply immediately) | Per-cell gene: uniform(0.003, 0.05) |
+| 10 (gradient threshold) | **Config value at runtime** (E/C changes apply immediately) | Per-cell gene: 10^uniform(−8,−4) |
+| 11 (activation slope) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: uniform(0.01, 0.3) |
+| 12 (weight prune threshold) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−3,−1) |
+| 13 (min contribution score) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−6,−2) |
+
+**Key difference:** With U off, changing a parameter via **E**, **I**, or **C** takes effect **immediately** on every cell — the config value is read fresh each forward/backward pass and each pruning check. With U on, each cell uses its own gene allele; the only way to change it is through **evolution** (birth with new genes) or **X** (re-init from config).
 
 ---
 
@@ -368,11 +400,11 @@ from cells A through I (skipping any empty positions).
 The bias is the cell's resting potential — a baseline signal present even with
 no input. It is learned via gradient descent, just like the weights.
 
-**Step 3: Apply leaky ReLU activation.**
+**Step 3: Apply leaky ReLU activation** (gene 11 = **activation_slope**; set via **E** or per-cell when **U** is on — see **Key E — what you will enter**).
 
 ```
     if charge > 0:  charge = charge           (pass through)
-    if charge ≤ 0:  charge = slope × charge   (gene 11 controls slope)
+    if charge ≤ 0:  charge = slope × charge   (slope = activation_slope)
 ```
 
 Low slope (0.01) = selective neuron, suppresses negative signals.
@@ -566,7 +598,7 @@ All screens include footnotes explaining when metrics are measured (snapshot vs 
 | **He initialization** | Weight reset (**X** key) measures average effective fan-in and scales as `randn × √(2/fan_in)` |
 | **Smart defaults with suggestions** | `suggestParams()` scans the network and suggests LR, bias range, weight decay, pruning thresholds. Shown in **E**, **I**, **C** dialogs and **V** screen |
 | **Save / Load** | **S** exports full network state as JSON; **L** imports it; auto-downloads a snapshot when accuracy hits 100% |
-| **Save filename convention** | Prefix = accuracy tier letter (P = perfect, A–J = tiers, N = none, X = unknown) + dataset letter (M/F/S/U/X) |
+| **Save filename convention** | `saved_N_980_1000_L8W9_250402_045.json` — N/F = dataset (N = number-MNIST, F = Fashion), maxCorrect\_epochSize, L = layers, W = weights, YYMMDD, 3-digit milliseconds |
 
 ---
 
@@ -584,37 +616,98 @@ All screens include footnotes explaining when metrics are measured (snapshot vs 
 
 ---
 
+## Key **E** — what you will enter (prompt order)
+
+Press **E** (2D view only). A series of modal dialogs appears **in this order**. Type a number (or keep the default) and click **OK** for each. Lines marked **← net** show an optional suggestion from the live network; you can copy that value or ignore it.
+
+| Step | Prompt label | What it means |
+|------|----------------|---------------|
+| 1 | `num_layers (4-16):` | How many layers in the stack (input + hidden + label layer). |
+| 2 | `dendrite length:` | 1–4. Sets dendrite footprint: matrix side = `2×length+1` (e.g. 1 → 3×3 = 9 weights per cell). |
+| 3 | `mutation_rate:` | Gene 3 scale for germline/somatic mutation rates (see genes section). |
+| 4 | `lower_allele:` | Lower bound for random Conway genes (OT/IT/BT). |
+| 5 | `upper_allele:` | Upper bound for random Conway genes. |
+| 6 | `weight_change_threshold:` | Threshold for detecting “large” weight changes in some diagnostics. |
+| 7 | `avg_weights_cell (current: …) [net suggests: …]:` | Target average fan-in for He init / scaling; often auto-updated after dendrite change. |
+| 8 | `weight_decay (current: …) [net suggests: …]:` | L2-style shrink on weights each update (gene 8). |
+| 9 | `bias_range (current: …) [net suggests: …]:` | Scale for **initial** bias randomization (not the same as activation slope). |
+| 10 | `learning_rate (current: …) [net suggests: …]:` | Step size for weight/bias updates (gene 9). |
+| 11 | `charge_delta (current: …) [net suggests: …]:` | Activity threshold for pruning / “significant” charge change (gene 7 / config). |
+| 12 | `gradient_threshold (current: …) [net suggests: …]:` | Survival threshold for gradient-based pruning (gene 10 / config). |
+| 13 | `activation_slope (current: …) [net suggests: …]:` | **Leaky ReLU negative slope** (gene 11) — explained below. |
+
+After the last prompt, hidden cells may **remap weights** if dendrite size changed, and **avg_weights_cell** may be auto-set from measured fan-in.
+
+### What is **activation slope**? When is it used?
+
+It is a **single positive number** (typical range about **0.01** to **0.3**; web default **0.01**).
+
+**When it runs:** On **every forward pass**, for **every hidden/output cell**, **after** the cell computes the weighted sum of upstream charges plus bias (the “pre-activation” value). That value is passed through a **leaky ReLU**:
+
+- If **pre-activation > 0** → the cell’s **charge** becomes that value (unchanged).
+- If **pre-activation ≤ 0** → the cell’s **charge** becomes **`activation_slope × pre-activation`**.
+
+So the slope only affects **negative or zero** linear outputs. It does **not** set the bias initial range (that’s **bias_range** earlier in the **E** wizard).
+
+**Intuition:**
+
+- **Small slope (e.g. 0.01)** — strong suppression of negative side: neuron acts like a **sharp** rectifier; weak inputs die out quickly.
+- **Larger slope (e.g. 0.2–0.3)** — more signal leaks through when the linear part is negative; neuron is **more permissive**.
+
+**Backprop:** The derivative of that activation uses the same slope on the negative side, so it also affects **how error flows backward** through that cell.
+
+With **U** (autonomous) on, each cell can carry its **own** gene 11 value; with **U** off, all cells use the global **activation_slope** you set here (and pruning still uses global thresholds where applicable).
+
+---
+
 ## Keyboard Controls
+
+### Training & Learning
+
+| Key | Action |
+|-----|--------|
+| **T** | Toggle training mode (forward pass + optional backprop) |
+| **B** | Toggle backpropagation (error signal + weight updates) |
+| **F / R** | Forward / Reverse charge flow direction |
+| **M** | Load training data — **J** (file), **D** then **M** or **F** (hosted MNIST / Fashion demo), or **M** (synthetic) |
+| **K** | Set gradient minibatch size (accumulate gradients over K samples before applying) |
+| **I** | Change learning rate (with suggestion based on fan-in) |
+
+### Evolution & Pruning
 
 | Key | Action |
 |-----|--------|
 | **Space** | Toggle running mode (enables evolution loop: Andromida birth/death + pruning) |
-| **A** | Toggle Andromida mode (genetic birth/death using cell genes) |
-| **T** | Toggle training mode (forward pass + optional backprop) |
-| **B** | Toggle backpropagation (error signal + weight updates) |
-| **F / R** | Forward / Reverse charge flow direction |
-| **P** | Toggle activity-based pruning (kills cells with low charge change, low weight magnitude, low contribution score) |
-| **O** | Toggle gradient-based pruning (kills cells with low gradient) |
-| **=** | Toggle prune logic between AND/OR (for charge-based pruning) |
-| **C** | Change pruning parameters: charge delta, gradient threshold, min contribution score, prune percentile |
-| **U** | Toggle autonomous cell genes (per-cell vs global parameters) |
-| **M** | Load training data — **J** (file), **D** then **M** or **F** (hosted MNIST / Fashion demo JSON), or **M** (synthetic) |
-| **K** | Set gradient minibatch size (accumulate gradients over K samples) |
-| **G** | 2D: switch genes/proteins display. 3D: cycle color mode (Charge → Error → Gradient → Weight Strength → Contribution) |
-| **V** | Cycle statistics views (Settings + Pruning Readiness / Averages / Cell Types) |
-| **E** | Edit all parameters interactively (with network-measured suggestions) |
-| **I** | Change learning rate (with suggestion based on fan-in) |
+| **A** | Toggle Andromida mode (genetic birth/death using cell genes 0–2) |
+| **P** | Toggle activity-based pruning (charge change, weight magnitude, contribution score — genes 7, 12, 13) |
+| **O** | Toggle gradient-based pruning (avg gradient — gene 10) |
+| **=** | Toggle prune logic between AND / OR (for charge-based pruning) |
+| **C** | Change pruning parameters: charge delta, gradient threshold, contribution score, percentile |
+| **U** | Toggle autonomous cell genes (per-cell evolved vs global config for genes 3–13) |
+
+### Network Editing & Reset
+
+| Key | Action |
+|-----|--------|
+| **E** | Edit all 13 parameters — see **Key E — what you will enter** |
 | **X** | Reset network weights/biases (He initialization, auto-computes scaling) |
-| **N** | Nuke all hidden layer cells |
-| **S / L** | Save / Load network state (JSON) |
 | **W** | Reset gradient tracking for all cells |
-| **D** | Toggle display updating (training + plots always run; only expensive cell rendering is toggled) |
+| **N** | Nuke all hidden-layer cells |
+| **S / L** | Save / Load network state (JSON) |
+| **Mouse** | Left-click: place/remove cells. Right-click / Ctrl+click: inspect cell. Drag: paint cells |
+
+### Visualization & Display
+
+| Key | Action |
+|-----|--------|
+| **G** | 2D: switch genes / proteins display. 3D: cycle color mode (Charge → Error → Gradient → Weight → Contribution) |
+| **V** | Cycle statistics views (Settings + Pruning / Averages / Cell Types) |
+| **D** | Toggle display updating (training + plots keep running; only cell rendering is paused) |
 | **3** | Toggle 3D Three.js view |
-| **4** | Toggle 3D backprop visualization (full network, Error color mode by default) |
+| **4** | Toggle 3D backprop visualization (full network, Error color mode) |
 | **Q** | Dump per-layer telemetry report to stats pane |
 | **H** | Jump to next **##** heading in the README help panel (2D only) |
 | **?** | Scroll help panel to top |
-| **Mouse** | Left-click: place/remove cells. Right-click/Ctrl+click: inspect cell. Drag: paint cells |
 
 ---
 

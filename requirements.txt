@@ -2,6 +2,9 @@ pygame
 numpy
 Pillow
 
+# Build neurosim_web.html from README.md (help panel preview)
+markdown>=3.4
+
 # Optional - for 3D visualization
 # PyOpenGL
 

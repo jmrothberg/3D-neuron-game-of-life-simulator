@@ -1,29 +1,48 @@
 #!/usr/bin/env python3
-"""Build standalone neurosim_web.html (inline JS + help from get_help_defs.py)."""
-import importlib.util
+"""Build standalone neurosim_web.html (inline JS + README.md rendered as help HTML)."""
 import json
+import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+README_PATH = ROOT / "README.md"
 
 
-def load_help():
-    spec = importlib.util.spec_from_file_location("get_help_defs", ROOT / "get_help_defs.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    defs = mod.get_defs()
-    keys = [
-        "jmr_defs", "jmr_defs2", "conways_defs", "how_network_works", "forward_pass",
-        "how_backprop_works", "how_backprop_works2", "controls",
-    ]
-    return {k: d.strip() for k, d in zip(keys, defs)}
+def load_readme_html() -> str:
+    """Convert README.md to HTML (tables, fenced code, TOC ids on headings for H-key nav)."""
+    text = README_PATH.read_text(encoding="utf-8")
+    try:
+        import markdown
+    except ImportError:
+        print(
+            "ERROR: package 'markdown' is required to build formatted help from README.md.\n"
+            "  python3 -m pip install markdown\n"
+            "Falling back to escaped plain text (no tables/rendering).",
+            file=sys.stderr,
+        )
+        import html as html_mod
+
+        return f'<pre class="readme-fallback">{html_mod.escape(text)}</pre>'
+
+    html = markdown.markdown(
+        text,
+        extensions=["toc", "tables", "fenced_code"],
+    )
+    # Open external links in a new tab when the app is served over http(s).
+    html = re.sub(
+        r'<a href="(https?://[^"#]+)"',
+        r'<a target="_blank" rel="noopener noreferrer" href="\1"',
+        html,
+    )
+    return html
 
 
 def main():
-    help_obj = load_help()
+    readme_html = load_readme_html()
     js_path = ROOT / "neurosim_web.js"
     js = js_path.read_text(encoding="utf-8")
-    help_js = json.dumps(help_obj, ensure_ascii=False)
+    readme_js = json.dumps(readme_html, ensure_ascii=False)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,8 +69,9 @@ def main():
     #statusDock {{ flex: 0 0 auto; background: #000; color: #cfc; font: 12px/1.3 monospace; padding: 6px 8px; border-top: 1px solid #333; }}
     #statusLines {{ line-height: 1.25; }}
     #colSplitter {{ flex: 0 0 6px; width: 6px; cursor: col-resize; background: #444; border: solid #222; border-width: 0 1px; }}
-    #side {{ flex: 0 0 500px; width: 500px; min-width: 260px; max-width: 92vw; background: #e8e8e8; color: #111; display: flex; flex-direction: column; font: 13px/1.35 monospace; padding: 0; min-height: 0; height: 100vh; box-sizing: border-box; }}
-    #helpScroll {{ flex: 1 1 60%; min-height: 40px; margin: 0; padding: 10px; overflow-y: auto; white-space: pre-wrap; font: 13px/1.45 system-ui, sans-serif; }}
+    #side {{ flex: 0 0 500px; width: 500px; min-width: 260px; max-width: 92vw; background: #e8e8e8; color: #111; display: flex; flex-direction: column; font: 13px/1.35 system-ui, sans-serif; padding: 0; min-height: 0; height: 100vh; box-sizing: border-box; }}
+    /* Help = README.md preview (markdown HTML) + session log */
+    #helpScroll {{ flex: 1 1 60%; min-height: 40px; margin: 0; padding: 10px 12px; overflow-y: auto; overflow-x: auto; white-space: normal; color: #111; }}
     #sideSplitter {{ flex: 0 0 5px; height: 5px; cursor: row-resize; background: #999; border: solid #bbb; border-width: 1px 0; }}
     #statsScroll {{ flex: 1 1 40%; min-height: 40px; margin: 0; padding: 10px; overflow-y: auto; white-space: pre-wrap; font: 12px/1.35 monospace; background: #dde8dd; color: #111; }}
     #modalMask {{ display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); align-items: center; justify-content: center; z-index: 100; }}
@@ -61,6 +81,33 @@ def main():
     #filePick {{ display: none; }}
     .row {{ margin-top: 8px; }}
     button {{ margin-right: 6px; }}
+    /* README markdown preview */
+    #helpScroll .quick-start {{ background: #e8f2fc; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; border: 1px solid #9bd; }}
+    #helpScroll .quick-start .quick-h {{ margin: 0 0 6px 0; font-size: 1rem; color: #024; }}
+    #helpScroll .quick-start .quick-pre {{ margin: 0; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }}
+    #helpScroll .readme-body {{ max-width: 100%; line-height: 1.45; }}
+    #helpScroll .readme-body h1 {{ font-size: 1.28rem; margin: 0.9em 0 0.35em; padding-bottom: 4px; border-bottom: 2px solid #89a; color: #012; }}
+    #helpScroll .readme-body h2 {{ font-size: 1.08rem; margin: 1em 0 0.3em; color: #023; scroll-margin-top: 6px; }}
+    #helpScroll .readme-body h3 {{ font-size: 0.98rem; margin: 0.85em 0 0.25em; color: #034; }}
+    #helpScroll .readme-body h4 {{ font-size: 0.92rem; margin: 0.75em 0 0.2em; }}
+    #helpScroll .readme-body p {{ margin: 0.45em 0; }}
+    #helpScroll .readme-body ul, #helpScroll .readme-body ol {{ margin: 0.4em 0; padding-left: 1.35em; }}
+    #helpScroll .readme-body li {{ margin: 0.2em 0; }}
+    #helpScroll .readme-body hr {{ border: none; border-top: 1px solid #bbb; margin: 1em 0; }}
+    #helpScroll .readme-body blockquote {{ margin: 0.5em 0; padding: 4px 10px; border-left: 3px solid #89a; background: #f4f6f8; color: #222; }}
+    #helpScroll .readme-body table {{ border-collapse: collapse; width: 100%; font-size: 11px; margin: 0.65em 0; max-width: 100%; }}
+    #helpScroll .readme-body thead {{ background: #dde8f0; }}
+    #helpScroll .readme-body th, #helpScroll .readme-body td {{ border: 1px solid #aab; padding: 4px 6px; vertical-align: top; text-align: left; }}
+    #helpScroll .readme-body tr:nth-child(even) {{ background: rgba(0,0,0,0.03); }}
+    #helpScroll .readme-body pre {{ overflow-x: auto; background: #f0f2f5; padding: 8px 10px; border-radius: 4px; font: 11px/1.28 ui-monospace, monospace; margin: 0.6em 0; border: 1px solid #ccd; white-space: pre; }}
+    #helpScroll .readme-body code {{ background: #eaecef; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; font-family: ui-monospace, monospace; }}
+    #helpScroll .readme-body pre code {{ background: none; padding: 0; font-size: inherit; }}
+    #helpScroll .readme-body a {{ color: #06c; }}
+    #helpScroll .readme-body strong {{ font-weight: 600; }}
+    #helpScroll .readme-fallback {{ white-space: pre-wrap; font: 12px ui-monospace, monospace; }}
+    #helpScroll .help-sep {{ border: none; border-top: 2px solid #999; margin: 16px 0 10px; }}
+    #helpScroll .help-log-h {{ font-size: 0.95rem; margin: 0 0 6px 0; color: #222; }}
+    #helpScroll .help-log {{ white-space: pre-wrap; font: 11px ui-monospace, monospace; margin: 0; padding: 8px; background: #fafafa; border: 1px solid #ccc; border-radius: 4px; max-height: min(28vh, 220px); overflow-y: auto; color: #111; }}
   </style>
 </head>
 <body>
@@ -72,8 +119,8 @@ def main():
       </div>
       <div id="plotStrip">
         <div id="plotControls">
-          <label class="plotLab">Epoch Y-scale<input type="range" id="plotYEpoch" min="1" max="200" step="1" value="50" /></label>
-          <label class="plotLab">Minibatch Y-scale<input type="range" id="plotYMinibatch" min="1" max="200" step="1" value="50" /></label>
+          <label class="plotLab">Epoch Y-scale<input type="range" id="plotYEpoch" min="0.1" max="20" step="0.1" value="10" /></label>
+          <label class="plotLab">Minibatch Y-scale<input type="range" id="plotYMinibatch" min="0.1" max="20" step="0.1" value="10" /></label>
         </div>
         <div id="predBatchWrap" title="Mean loss per full epoch — one pass over all training samples (green)">
           <canvas id="predBatch" width="1008" height="72"></canvas>
@@ -88,7 +135,7 @@ def main():
     </div>
     <div id="colSplitter" title="Drag to resize panels"></div>
     <div id="side">
-      <pre id="helpScroll"></pre>
+      <div id="helpScroll"></div>
       <div id="sideSplitter" title="Drag to resize help / stats"></div>
       <pre id="statsScroll"></pre>
     </div>
@@ -106,7 +153,7 @@ def main():
   </div>
   <input id="filePick" type="file" accept=".json,application/json" />
 <script>
-const HELP_SCREEN = {help_js};
+const README_HTML = {readme_js};
 </script>
 <script>
 {js}
