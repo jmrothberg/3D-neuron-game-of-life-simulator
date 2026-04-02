@@ -141,6 +141,17 @@ def build_sample(image: list[list[int]], label: int, layer_last: int) -> dict:
     return {"layer0": layer0, "layerLast": layer_l}
 
 
+def build_sample_compact(image: list[list[int]], label: int) -> dict:
+    """Compact format: layer0 is a flat list of 784 charge floats (row-major x then y),
+    label is the integer digit. The JS loader reconstructs full Cell objects at load time.
+    ~40 bytes per sample vs ~390 KB in the verbose format → 5000 samples ≈ 15 MB."""
+    charges = []
+    for x in range(GRID):
+        for y in range(GRID):
+            charges.append(round(image[x][y] / 255.0, 6))
+    return {"c": charges, "l": label}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="MNIST/Fashion-MNIST → neurosim_web training JSON")
     ap.add_argument(
@@ -176,6 +187,11 @@ def main() -> int:
         action="store_true",
         help="Disable TLS certificate verification (use if downloads fail with CERTIFICATE_VERIFY_FAILED)",
     )
+    ap.add_argument(
+        "--verbose-cells",
+        action="store_true",
+        help="Write full cell objects per pixel (old format, very large). Default is compact: charges + label only (~100x smaller).",
+    )
     args = ap.parse_args()
 
     if args.count < 1 or args.offset < 0:
@@ -209,11 +225,16 @@ def main() -> int:
         return 2
 
     samples = []
+    use_compact = not args.verbose_cells
     for i in range(args.offset, end):
-        samples.append(build_sample(images[i], labels[i], args.layer_last))
+        if use_compact:
+            samples.append(build_sample_compact(images[i], labels[i]))
+        else:
+            samples.append(build_sample(images[i], labels[i], args.layer_last))
 
+    fmt = "neurosim_web_training_v2_compact" if use_compact else "neurosim_web_training_v1"
     payload = {
-        "format": "neurosim_web_training_v1",
+        "format": fmt,
         "dataset": args.dataset,
         "width": GRID,
         "height": GRID,

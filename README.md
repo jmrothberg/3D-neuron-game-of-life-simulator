@@ -438,6 +438,8 @@ python3 build_neurosim_web.py
 
 Open `neurosim_web.html` in a browser (network needed once for the Three.js CDN). Saves/loads simulation state as **JSON** (not Python pickle). Training: press **M** for synthetic mini-batches or choose **J** and pick a JSON file with `samples: [{ layer0, layerLast }, ...]` (each a 28×28 grid of cell objects or nulls, same shape as the desktop tensor).
 
+**`file://` security errors:** Chromium may log *Unsafe attempt to load URL … from frame … 'file:' URLs are treated as unique security origins* if you open the HTML from disk (double-click) or inside some embedded preview panes. Each `file://` path can be treated as its own origin, so subframes or certain loads that used to work can start failing after a browser update, and the page may stop training or break 3D. **Fix:** serve the repo over HTTP from the project directory, then open the page by URL (not `file:`), for example: `python3 -m http.server 8765` and browse to `http://localhost:8765/neurosim_web.html`.
+
 **MNIST / Fashion-MNIST → web JSON** (downloads official IDX gzip URLs, stdlib only):
 
 ```bash
