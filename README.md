@@ -4,6 +4,11 @@ A bio-inspired neural network simulator where neurons are living cells with **14
 
 **100/100 on MNIST. 98/100 on Fashion-MNIST.**
 
+**[▶ Run in your browser — no install](https://jmrothberg.github.io/3D-neuron-game-of-life-simulator/neurosim_web.html)**  
+Press **M** → **D** → OK, then **M** (MNIST) or **F** (Fashion-MNIST) to load a bundled 500-sample demo, then **T** to train.
+
+**Legacy Python desktop version:** see [`neurosim_python/README.md`](neurosim_python/README.md).
+
 ---
 
 ## Why This Is Different
@@ -22,17 +27,82 @@ The result is a network that **self-organizes its own topology** through genetic
 
 ---
 
+## How This Is Different from a Traditional NN
+
+Traditional NN: weights live in **layer-to-layer matrices** owned by the network. A global optimizer updates all weights at once.
+
+This simulator: weights live **inside each cell's dendrites** — a flat 1D array (`weights[]`) the cell owns and updates independently. There is no global weight matrix. Each cell runs its own gradient descent with its own learning rate (gene 9), weight decay (gene 8), and activation curve (gene 11).
+
+---
+
 ## The Cell: Genes, Proteins, and Cell Memory
 
-Every cell has three types of information, inspired by molecular biology:
+Every cell carries three types of information, inspired by molecular biology:
 
-- **Genes (14 values)** — inherited, mostly stable parameters that define the cell's identity, structure, and pruning sensitivity. These are the cell's *genotype*.
-- **Proteins (5 values)** — dynamic, mutable state that changes every training step: charge, error, bias, weights, gradient. These are the cell's *phenotype*.
-- **Cell Memory (6 fields)** — rolling statistics computed from training history, stored inside the cell. Used for pruning decisions and contribution scoring.
+- **Genes (14 values)** — inherited, stable parameters that define the cell's identity, structure, pruning sensitivity, and **how protein state is created and updated**. These are the cell's *genotype*.
+- **Proteins (5 values)** — dynamic *phenotype*: charge, error, bias, weights, gradient. Their **layout, initialization, and dynamics are gene-programmed**; their **numerical values change** every training step (see below).
+- **Cell Memory (6 fields)** — not a separate chemical layer: they are **integrative traces of what the charge and gradient proteins have been doing** over recent training (see below). Used for pruning and survival decisions.
+
+### How genes specify proteins (expression, updates, and cutoffs)
+
+In this model, **proteins are not arbitrary numbers** — they are **generated and governed by alleles** the same way real proteins are specified by the genome:
+
+| Idea | Role of genes | What still **changes** at the protein level |
+|------|----------------|----------------------------------------------|
+| **Shape / count** | Gene **4** (dendrite size) fixes how many **weight** slots exist; gene **6** + **4** set He scaling for **initial weights**; gene **5** sets the **scale for initial bias**. | After init, **each weight and bias value** is free to move with learning. |
+| **Dynamics** | Genes **9** (learning rate), **8** (decay), **11** (activation slope) set **how** charge is computed from inputs and **how fast** bias/weights move when gradients arrive. | **Charge, error, gradient** are recomputed every forward/backward step; **weights** and **bias** accumulate experience. |
+| **Cutoffs / thresholds** | Genes **7**, **10**, **12**, **13** (or global config when **U** is off) hold **fixed comparison levels**: “enough activity,” “enough gradient,” “enough weight magnitude,” “enough contribution.” Those allele/config values **do not replace** the proteins — they are compared **against** quantities built from **changing** protein state (and from integrative memory derived from charge/gradient). | The **signals being tested** (charge swings, avg \|gradient\|, max \|weight\|, contribution score) **rise and fall** with training; the **bar** often stays on the gene side. |
+
+So: **alleles supply architecture, initial scales, update rules, and threshold levels**; **proteins carry the evolving numbers** that learning and activity produce. Cutoff **values** may be **initialized from** or **stored as** gene (or config) alleles, but the **quantities being cut off** live in the phenotype and **can change** every sample.
+
+### Memory: which proteins store what (and how “cell memory” fits)
+
+**Genes do not store experience.** Experience is carried in **protein-level state** and in **summaries derived from protein trajectories** — a useful mental model is **post-translational / activity-dependent modification**: the genome is fixed, but what happens to the cell **leaves marks in proteins and in slow variables built from protein readouts**.
+
+**1. Long-term memory — stored directly in proteins**
+
+| Protein | What is “remembered” |
+|---------|----------------------|
+| **Weights** | Learned connection strengths; they persist and accumulate changes across samples. This is the main **synaptic memory** of the cell. |
+| **Bias** | Learned resting offset; also persistent across samples. |
+
+Together, **weights** and **bias** are where the network’s **learned mapping** actually lives.
+
+**2. Fast signaling — proteins that change every step (not “storage” in the archival sense)**
+
+| Protein | Role |
+|---------|------|
+| **Charge** | Current activation after this forward pass — a **snapshot**, overwritten in meaning on the next image. |
+| **Error** | Current backprop signal for this step. |
+| **Gradient** | Immediate direction of plasticity for each weight slot this step. |
+
+These are essential for learning, but they are **not** where the cell keeps a running record of the whole epoch by themselves.
+
+**3. Integrative “memory” — the six fields as traces of protein activity**
+
+The **six cell-memory fields** are **not** extra proteins in the table above. In biological terms, think of them as **activity-dependent integration** on top of the same phenotype: the cell **watches its own charge and gradient proteins over time** and updates rolling summaries.
+
+| Cell memory field | Built from which proteins / behavior |
+|-------------------|--------------------------------------|
+| **max_charge_diff_forward** / **max_charge_diff_reverse** | History of **charge** along forward vs reverse flow (range of firing over a sliding window). |
+| **avg_gradient_magnitude** | History of **\|gradient\|** (how strongly the cell has been nudged to learn). |
+| **contributionScore** | Combines charge-diff traces × average gradient magnitude (“active” × “learning”). |
+| **significant_charge_change_*** / **significant_gradient_change** | Sticky flags: “has **charge-** or **gradient**-related behavior ever crossed a threshold?” — like a long-lived mark once a pathway has been strongly engaged; used for Conway-style protection, not for the numeric pruning averages. |
+
+So: **weights and bias** store **what was learned**; **charge, error, gradient** carry **what is happening now**; the **six memory fields** store **compressed history of charge and gradient dynamics** for pruning and scoring — conceptually aligned with **post-translational, experience-dependent state** without ever editing the genome.
 
 ---
 
 ### The 14 Genes
+
+**Genes are fixed after a cell is created.** They do not change during training or backprop.
+
+**Two exceptions (real biology has these too):**
+
+- **Germline mutation:** When a new cell is born from two parents, gene 3 can trigger re-randomization of breeding or network genes (probability = **MR / 1000** per birth).
+- **Somatic mutation:** While a cell is alive, the same gene 3 can very rarely trigger a full gene re-init (probability = **MR / 100,000** per evolution step). This is 100× rarer than germline, matching biology where somatic mutations are uncommon events.
+
+**Gene 3 (mutation rate)** therefore controls **both** offspring mutation (germline) and rare in-life mutation (somatic), at different rates.
 
 Genes 0–2 control **survival and reproduction** (Game of Life rules).
 Genes 3–8 control **network structure and regularization**.
@@ -44,16 +114,16 @@ Genes 12–13 control **pruning sensitivity**.
 | **0** | Overcrowding Tolerance | OT | Max alive neighbors before cell dies | 2–15 (random) | 2–15 (random) | Apoptosis from contact inhibition |
 | **1** | Isolation Tolerance | IT | Min alive neighbors before cell dies | 2–15 (≤ gene 0) | 2–15 (≤ gene 0) | Death from lack of trophic factors |
 | **2** | Birth Threshold | BT | Exact neighbor count to reproduce | 2–15 (random) | 2–15 (random) | Morphogen concentration for mitosis |
-| **3** | Mutation Rate | MR | Probability of gene mutation | From config | 0–99 (random) | DNA repair fidelity |
-| **4** | Dendrite Size | WG | Number of synaptic weights | From config (9, 25, 49, or 81) | 9 or 25 or 49 | Dendritic arbor complexity |
-| **5** | Bias Range | BR | Initial bias magnitude | From config | 0.001 or 0.01 | Resting membrane potential range |
-| **6** | Fan-In | AW | Weight initialization scaling (He) | From config | Count of connected upstream cells | Synaptic normalization factor |
+| **3** | Mutation Rate | MR | Probability of gene mutation (germline and somatic) | From config (10) | 0–99 (random) | DNA repair fidelity |
+| **4** | Dendrite Size | WG | Number of synaptic weights | From config (9) | 9 or 25 or 49 | Dendritic arbor complexity |
+| **5** | Bias Range | BR | Initial bias magnitude | From config (0.01) | 0.001 or 0.01 | Resting membrane potential range |
+| **6** | Fan-In | AW | Weight initialization scaling (He) | From config (5) | Count of connected upstream cells | Synaptic normalization factor |
 | **7** | Charge Delta | CD | Threshold for "significant" activity | From config (0.01) | 10^uniform(−6,−2) | Activity-dependent survival signal |
 | **8** | Weight Decay | WD | L2 regularization strength | From config (1e-5) | 10^uniform(−6,−4) | Synaptic protein turnover rate |
 | **9** | Learning Rate | LR | Synaptic plasticity speed | From config (0.01) | uniform(0.003, 0.05) | Hippocampal vs cortical plasticity |
 | **10** | Gradient Threshold | GT | Gradient-pruning survival threshold | From config (1e-4) | 10^uniform(−8,−4) | Neurotrophic factor receptor density |
 | **11** | Activation Slope | AS | Leaky ReLU negative slope | From config (0.01) | uniform(0.01, 0.3) | Neuron selectivity / response curve |
-| **12** | Weight Prune Threshold | WPT | Min max-|weight| to survive pruning | From config (0.01) | 10^uniform(−3,−1) | Synaptic maintenance threshold |
+| **12** | Weight Prune Threshold | WPT | Min max-\|weight\| to survive pruning | From config (0.01) | 10^uniform(−3,−1) | Synaptic maintenance threshold |
 | **13** | Min Contribution Score | MCS | Min contribution score to survive | From config (0, off) | 10^uniform(−6,−2) | Activity-dependent trophic requirement |
 
 #### Gene Groups Explained
@@ -64,7 +134,7 @@ Genes 12–13 control **pruning sensitivity**.
 
 **Genes 9–11 (Learning Dynamics):** Control how each cell learns. Gene 9 (Learning Rate) is the single most impactful gene — in autonomous mode, evolution can discover that deep-layer cells should learn slowly while output cells learn fast. Gene 11 (Activation Slope) controls neuron selectivity: low slope (0.01) = highly selective, suppresses negative signals; high slope (0.3) = permissive, passes more signal through.
 
-**Genes 12–13 (Pruning Sensitivity):** New in this version. These genes put pruning thresholds *inside* the cell. In non-autonomous mode, all cells share the same global values from config. In autonomous mode, each cell evolves its own sensitivity — cells can become more or less resilient to pruning pressure through natural selection. This is analogous to cells expressing different levels of trophic factor receptors: a cell with a low MCS (gene 13) is "easy to satisfy" and survives with minimal contribution, while a cell with a high MCS is under stronger pressure to contribute or die.
+**Genes 12–13 (Pruning Sensitivity):** These genes put pruning thresholds *inside* the cell. In non-autonomous mode, all cells share the same global values from config. In autonomous mode, each cell evolves its own sensitivity — cells can become more or less resilient to pruning pressure through natural selection. This is analogous to cells expressing different levels of trophic factor receptors: a cell with a low MCS (gene 13) is "easy to satisfy" and survives with minimal contribution, while a cell with a high MCS is under stronger pressure to contribute or die.
 
 ### Gene 4 (Dendrite Size) Detail
 
@@ -85,7 +155,7 @@ Genes 7, 8, 10, 12, and 13 span multiple orders of magnitude. If you use a unifo
 
 ### The 5 Proteins
 
-Proteins are the dynamic state that changes every forward/backward pass. They are the cell's *expressed behavior*.
+These are the cell's *expressed behavior*: their **existence and update laws** come from **genes** (above); the **numbers in the table below** change every forward/backward pass as training runs.
 
 | Protein | Symbol | What It Is | How It Changes | Range | Biological Analogy |
 |---------|--------|-----------|----------------|-------|--------------------|
@@ -99,18 +169,22 @@ Proteins are the dynamic state that changes every forward/backward pass. They ar
 
 ### The 6 Cell Memory Fields
 
-Cell memory stores rolling statistics derived from training. These are computed from proteins but persist across samples. All pruning decisions read from cell memory — the cell carries its own history.
+These fields are the **integrative traces** described in **Memory: which proteins store what** — summaries of **charge** and **gradient** over time, not extra named proteins in the five-protein list. All pruning decisions read from them; the cell carries its own recent history of activity and plasticity.
 
 | Field | What It Tracks | How It's Updated | Used By |
 |-------|---------------|-----------------|---------|
-| **max_charge_diff_forward** | Max charge swing across forward-pass training samples | Each forward pass: push charge, track running max − min | Activity pruning (P key), contribution score |
-| **max_charge_diff_reverse** | Max charge swing across reverse-pass training samples | Each reverse pass: push charge, track running max − min | Activity pruning (P key), contribution score |
-| **avg_gradient_magnitude** | Rolling average of |gradient| over recent samples | Each backward pass: push |gradient| to history window (size = training data count), compute mean | Gradient pruning (O key), contribution score |
+| **max_charge_diff_forward** | Max charge swing across forward-pass training samples | Each forward pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
+| **max_charge_diff_reverse** | Max charge swing across reverse-pass training samples | Each reverse pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
+| **avg_gradient_magnitude** | Rolling average of \|gradient\| over recent samples | Each backward pass: push \|gradient\| to history window (size = training data count), compute mean | Gradient pruning (O key), contribution score |
 | **contributionScore** | Combined activity + learning signal | `max(max_charge_diff_fwd, max_charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (gene 13), percentile pruning, 3D color mode |
-| **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > gene[7]`, never cleared (until explicit reset) | Conway death protection only (shouldDieGenetic) |
-| **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > gene[7]`, never cleared | Conway death protection only (shouldDieGenetic) |
+| **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > threshold`, never cleared (until explicit reset) | Conway death protection only (shouldDieGenetic) |
+| **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
+
+The implementation also keeps **significant_gradient_change** — a sticky flag set when **avg_gradient_magnitude** crosses the gradient threshold (gene 10), Conway death protection only, parallel to the charge stickies.
 
 **Key design principle:** All rolling metrics (`max_charge_diff_*`, `avg_gradient_magnitude`, `contributionScore`) are *live* — they reflect recent training and are used for pruning decisions. The *sticky* flags (`significant_charge_change_*`, `significant_gradient_change`) are only used to protect cells from Conway-style genetic death, ensuring that cells that have ever contributed are not killed by overcrowding/isolation rules.
+
+**Pruning uses rolling windows, not single-sample snapshots.** The rolling window for `max_charge_diff_*` and `avg_gradient_magnitude` is sized to the training set (1 epoch worth of samples). A cell must be consistently inactive or non-learning across many images before it can be pruned.
 
 ---
 
@@ -130,7 +204,7 @@ The three information layers create a two-timescale system:
 - Gene 9 determines *how fast* the cell learns → Protein (weights) update at that rate
 - Gene 10 determines the *gradient survival threshold* → Cell memory (avg_gradient_magnitude) is compared against it
 - Gene 11 determines the *response curve* → Protein (charge) passes through that activation function
-- Gene 12 determines *weight-magnitude pruning sensitivity* → Protein (max |weight|) is compared against it
+- Gene 12 determines *weight-magnitude pruning sensitivity* → Protein (max \|weight\|) is compared against it
 - Gene 13 determines *contribution-score pruning sensitivity* → Cell memory (contributionScore) is compared against it
 - Genes 0–2 determine *who lives and dies* → The population of cells is shaped by these rules
 
@@ -140,197 +214,106 @@ The three information layers create a two-timescale system:
 
 The `U` key toggles `autonomous_network_genes`:
 
-- **Off (default):** All cells share the same network gene values from global config. This is like training a traditional network — uniform architecture and hyperparameters.
-- **On:** Each cell has its own random gene values, subject to evolution. This is the bio-inspired mode — cells evolve independently, producing a heterogeneous network.
+- **Off (default):** All cells share the same network gene values from global config. Pruning decisions for charge delta, gradient threshold, weight prune threshold, and min contribution score read from **config** at decision time — so changing values via **E** or **C** takes effect immediately on all cells without rewriting each cell's gene snapshot. This is like training a traditional network — uniform architecture and hyperparameters.
+- **On:** Each cell has its own random gene values, subject to evolution. Pruning reads from the per-cell gene values. This is the bio-inspired mode — cells evolve independently, producing a heterogeneous network.
 
 | Gene | Autonomous Off | Autonomous On |
 |------|---------------|---------------|
 | 0–2 (breeding) | Always per-cell | Always per-cell |
-| 3 (mutation rate) | Same for all cells | Random per cell |
+| 3 (mutation rate) | Same for all cells | Random per cell (0–99) |
 | 4 (dendrite size) | Same for all cells | Random: 9, 25, or 49 |
 | 5 (bias range) | Same for all cells | 0.001 or 0.01 |
 | 6 (fan-in) | Same for all cells | Measured per cell |
-| 7 (charge delta) | Same `config.charge_delta` | Log-uniform 1e-6 to 1e-2 |
-| 8 (weight decay) | Same `config.weight_decay` | Log-uniform 1e-6 to 1e-4 |
-| 9 (learning rate) | Same `config.learning_rate` | Uniform 0.003–0.05 |
-| 10 (gradient threshold) | Same `config.gradient_threshold` | Log-uniform 1e-8 to 1e-4 |
-| 11 (activation slope) | Same `config.activation_slope` | Uniform 0.01–0.3 |
-| 12 (weight prune threshold) | Same `config.weight_prune_threshold` | Log-uniform 1e-3 to 1e-1 |
-| 13 (min contribution score) | Same `config.min_contribution_score` | Log-uniform 1e-6 to 1e-2 |
+| 7 (charge delta) | Config value used for pruning | Per-cell: log-uniform 1e-6 to 1e-2 |
+| 8 (weight decay) | Same for all cells | Log-uniform 1e-6 to 1e-4 |
+| 9 (learning rate) | Same for all cells | Uniform 0.003–0.05 |
+| 10 (gradient threshold) | Config value used for pruning | Log-uniform 1e-8 to 1e-4 |
+| 11 (activation slope) | Same for all cells | Uniform 0.01–0.3 |
+| 12 (weight prune threshold) | Config value used for pruning | Log-uniform 1e-3 to 1e-1 |
+| 13 (min contribution score) | Config value used for pruning | Log-uniform 1e-6 to 1e-2 |
 
 ---
 
-## Pruning: Four Complementary Strategies
+## Conway's Game of Life vs This Version
 
-Pruning removes cells that don't contribute, mimicking synaptic pruning during brain development. The simulator implements four strategies that can be combined:
+**Original Conway's rules (fixed for all cells):**
+- Overcrowding (OT=3): >3 neighbors → die.
+- Isolation (IT=2): <2 neighbors → die.
+- Birth (BT=3): exactly 3 neighbors → new cell.
+- No genes, no mutation, no evolution. Rules are static.
+
+**This version makes OT, IT, BT into per-cell GENES that are inherited:**
+- Gene 0 (OT): neighbors ≤ OT to survive (dies if more)
+- Gene 1 (IT): neighbors ≥ IT to survive (dies if fewer)
+- Gene 2 (BT): neighbors == BT for birth
+- Survival band: IT ≤ neighbors ≤ OT (OT > IT enforced)
+
+Offspring inherit genes via crossover from two parents + mutation. This creates evolving populations with diverse survival strategies.
+
+---
+
+## Pruning: Five Complementary Strategies
+
+Pruning removes cells that don't contribute, mimicking synaptic pruning during brain development. The simulator implements five strategies that can be combined:
 
 ### Strategy 1: Activity-Based Pruning (P key)
 
-Cells whose charge doesn't change significantly across training samples are killed. Uses cell memory (`max_charge_diff_forward`, `max_charge_diff_reverse`) compared against gene 7 (Charge Delta).
+Cells whose charge doesn't change significantly across training samples are killed. Uses cell memory (`max_charge_diff_forward`, `max_charge_diff_reverse`) compared against gene 7 (Charge Delta) or config value.
 
 - **AND logic (`=` key):** Cell must show significant change in *both* forward and reverse passes to survive. Strict — requires bidirectional contribution.
 - **OR logic (`=` key):** Cell survives if it shows significant change in *either* direction. More lenient.
 
 ### Strategy 2: Gradient-Based Pruning (O key)
 
-Cells with average gradient magnitude below their survival threshold are killed. Uses cell memory (`avg_gradient_magnitude`) compared against gene 10 (Gradient Threshold).
+Cells with average gradient magnitude below their survival threshold are killed. Uses cell memory (`avg_gradient_magnitude`) compared against gene 10 (Gradient Threshold) or config value.
 
 ### Strategy 3: Weight-Magnitude Pruning (active when P is on)
 
-Cells whose maximum absolute weight falls below their weight prune threshold are killed. Uses protein data (max |weight|) compared against gene 12 (Weight Prune Threshold). Biologically: a synapse that has decayed to near zero carries no signal.
+Cells whose maximum absolute weight falls below their weight prune threshold are killed. Uses protein data (max \|weight\|) compared against gene 12 (Weight Prune Threshold) or config value. Biologically: a synapse that has decayed to near zero carries no signal.
 
 ### Strategy 4: Contribution-Score Pruning (active when P is on)
 
-Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses cell memory (`contributionScore`) compared against gene 13 (Min Contribution Score). Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
+Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses cell memory (`contributionScore`) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
 
 ### Strategy 5: Percentile Pruning (automatic at epoch boundary)
 
-At the end of each epoch, the bottom N% of cells (ranked by contribution score) are killed. Configured via `prune_percentile` (0 = off, set via C key). Unlike strategies 1–4 which use per-cell thresholds, this is a relative/competitive mechanism: cells must outperform their peers to survive.
+At the end of each epoch, the bottom N% of cells (ranked by contribution score) are killed. Configured via `prune_percentile` (0 = off, set via **C** key). Unlike strategies 1–4 which use per-cell thresholds, this is a relative/competitive mechanism: cells must outperform their peers to survive.
 
 ### Pruning Summary Table
 
-| Strategy | Trigger | What's Compared | Threshold Source | Biological Analogy |
-|----------|---------|----------------|-----------------|-------------------|
-| Activity (P) | P key on | `max_charge_diff_*` | Gene 7 (per-cell) | Activity-dependent survival |
-| Gradient (O) | O key on | `avg_gradient_magnitude` | Gene 10 (per-cell) | Neurotrophic factor requirement |
-| Weight-magnitude | P key on | `max(|weight|)` | Gene 12 (per-cell) | Synaptic maintenance threshold |
-| Contribution score | P key on | `contributionScore` | Gene 13 (per-cell) | Combined activity + learning requirement |
-| Percentile | End of epoch | Rank of `contributionScore` | Config `prune_percentile` (global) | Competitive survival pressure |
+| Strategy | Trigger | What's Compared | Threshold Source | When Checked | Biological Analogy |
+|----------|---------|----------------|-----------------|--------------|-------------------|
+| Activity (P) | P key on | `max_charge_diff_*` | Gene 7 / config | Every evolution step | Activity-dependent survival |
+| Gradient (O) | O key on | `avg_gradient_magnitude` | Gene 10 / config | Every evolution step | Neurotrophic factor requirement |
+| Weight-magnitude | P key on | `max(\|weight\|)` | Gene 12 / config | Every evolution step | Synaptic maintenance threshold |
+| Contribution score | P key on | `contributionScore` | Gene 13 / config | Every evolution step | Combined activity + learning |
+| Percentile | End of epoch | Rank of `contributionScore` | Config `prune_percentile` | Once per epoch boundary | Competitive survival pressure |
+
+**Note:** "Every evolution step" means pruning conditions are checked continuously. However, the metrics being checked (`max_charge_diff`, `avg_gradient_magnitude`) are rolling averages over an epoch-worth of samples, so a cell must be consistently inactive over many samples to fail.
 
 ---
 
 ## The Life Cycle of a Network
 
 ### Phase 1: Growth (Andromida Mode)
-Starting from a sparse grid, cells reproduce according to their birth genes. A cell is born at an empty location if its parent-derived gene 2 matches the local neighbor count. Offspring inherit all 14 genes from two parents via crossover, with mutation controlled by gene 3.
+
+Starting from a sparse grid, cells reproduce according to their birth genes. A cell is born at an empty location if its parent-derived gene 2 matches the local neighbor count. Offspring inherit all 14 genes from two parents via crossover, with germline mutation controlled by gene 3 (probability = MR/1000).
 
 ### Phase 2: Learning (Training Mode)
+
 Input layer cells are loaded with MNIST pixel data. Charge propagates forward through dendritic weights. Error propagates backward through reversed weight indices. Each cell updates its own weights and bias using its own learning rate (gene 9).
 
 ### Phase 3: Pruning (Environmental Selection)
+
 Cells that don't contribute to the network are removed through five mechanisms (see Pruning section above). In autonomous mode, each cell's tolerance for pruning pressure is encoded in its genes (7, 10, 12, 13) — evolution discovers which sensitivity levels lead to useful networks.
 
 ### Phase 4: Regrowth
-After pruning, evolution can restart. New cells fill gaps, potentially with mutated genes that produce different dendrite sizes, learning rates, activation slopes, or pruning sensitivities. The cycle repeats: grow → learn → prune → regrow.
+
+After pruning, evolution can restart. New cells fill gaps, potentially with mutated genes that produce different dendrite sizes, learning rates, activation slopes, or pruning sensitivities. Somatic mutation (gene 3, probability = MR/100,000) can also rarely re-randomize an existing cell's genes. The cycle repeats: **grow → learn → prune → regrow**.
 
 ---
 
-## Installation
-
-```bash
-git clone https://github.com/jmrothberg/3D-neuron-game-of-life-simulator.git
-cd 3D-neuron-game-of-life-simulator
-pip install -r requirements.txt
-```
-
-**Requirements:** Python 3.8+, pygame, numpy, Pillow. Optional: PyOpenGL (for 3D view), tensorflow/matplotlib (for data prep scripts in `old_code/`).
-
-## Running (Python Desktop Version)
-
-```bash
-python3 -m neurosim.main
-```
-
-## Keyboard Controls
-
-### All Keys (Desktop + Web)
-
-| Key | Action |
-|-----|--------|
-| **Space** | Toggle running mode (enables evolution loop: Andromida birth/death + pruning) |
-| **A** | Toggle Andromida mode (genetic birth/death using cell genes) |
-| **T** | Toggle training mode (forward pass + optional backprop) |
-| **B** | Toggle backpropagation (error signal + weight updates) |
-| **F / R** | Forward / Reverse charge flow direction |
-| **P** | Toggle activity-based pruning (kills cells with low charge change, low weight magnitude, low contribution score) |
-| **O** | Toggle gradient-based pruning (kills cells with low gradient) |
-| **=** | Toggle prune logic between AND/OR (for charge-based pruning) |
-| **C** | Change pruning parameters: charge delta, gradient threshold, min contribution score, prune percentile |
-| **U** | Toggle autonomous cell genes (per-cell vs global parameters) |
-| **M** | Load MNIST or Fashion-MNIST training data |
-| **K** | Set gradient minibatch size |
-| **G** | 2D: switch genes/proteins display. 3D: cycle color mode (Charge → Error → Gradient → Weight Strength → Contribution) |
-| **V** | Cycle statistics views (Settings + Pruning Readiness / Averages / Cell Types) |
-| **E** | Edit all parameters interactively (with network-measured suggestions) |
-| **I** | Change learning rate (with suggestion based on fan-in) |
-| **X** | Reset network genes/proteins (auto-computes He initialization scaling) |
-| **N** | Nuke all hidden layer cells |
-| **S / L** | Save / Load network state (JSON) |
-| **W** | Reset gradient tracking for all cells |
-| **D** | Toggle display updating (training + plots always run; only expensive cell rendering is toggled) |
-| **3** | Toggle 3D Three.js view |
-| **4** | Toggle 3D backprop visualization |
-| **Q** | Dump per-layer telemetry report to stats pane |
-| **H** | Cycle help screens (2D only) |
-| **?** | Scroll help to top |
-| **Mouse** | Left-click: place/remove cells, Right-click/Ctrl+click: inspect cell, Drag: paint cells |
-
-### Web-Only Key Differences
-
-| Key | Web Behavior |
-|-----|-------------|
-| **M** | Load training data — **J** (local file picker), **D** (fetch demo from server), or **M** (synthetic) |
-| **V** | Cycle statistics views → output goes to the dedicated stats pane below the help panel |
-| **Q** | Dump per-layer telemetry → stats pane |
-| **E** | Edit all parameters with `[net suggests: X]` hints from live network analysis |
-
----
-
-## 3D Visualization Color Modes
-
-Press **G** in 3D view to cycle through five color modes:
-
-| Mode | What It Shows | Color Mapping |
-|------|--------------|---------------|
-| **Charge** | Cell activation level | Dark (low) → Bright (high charge) |
-| **Error** | Backprop error signal | Blue (negative) → Dark (zero) → Red (positive) |
-| **Gradient** | Learning signal strength | Dark (low |gradient|) → Green (high |gradient|) |
-| **Weight Strength** | Average absolute weight | Dark (near-zero weights) → Yellow (strong weights) |
-| **Contribution** | Combined activity × learning score | Dark (low) → Cyan (medium) → White (high contribution) |
-
----
-
-## V Key: Statistics Views
-
-Press **V** to cycle through three statistics screens:
-
-### Screen 0: Current Settings + Pruning Readiness
-Shows all current config values alongside network-measured suggestions (`← net: X`). Includes:
-- Key learning parameters (LR, bias range, weight decay, etc.)
-- Pruning thresholds with `[gene 12]` and `[gene 13]` labels
-- Network measurements (cells, avg fan-in, median gradient/weight/charge/error)
-- **Pruning Readiness:** "Would die" counts for each pruning strategy at current settings
-- Contribution score percentile distribution (p10, p25, p50, p75, p90, max)
-
-### Screen 1: Per-Layer Averages
-Detailed per-layer statistics: average charge, error, gradient, weight, fan-in, dead neuron count, weight utilization.
-
-### Screen 2: Cell Types
-Cell type census and per-digit accuracy breakdown.
-
----
-
-## Typical Workflow
-
-1. Launch: `python3 -m neurosim.main` (desktop) or open the web version
-2. Load a saved network (`L`) or draw cells manually
-3. Load training data (`M`) — choose MNIST digits or Fashion-MNIST
-4. Set forward direction (`F`), enable backprop (`B`), start training (`T`)
-5. Check **V** screen for pruning readiness before enabling pruning
-6. Toggle pruning (`P` for activity/weight/contribution, `O` for gradient) to remove dead cells
-7. Use **C** to tune pruning thresholds (suggestions shown from network analysis)
-8. Disable display (`D`) for faster training
-9. Watch accuracy climb — save good networks (`S`)
-
----
-
-## How Forward/Backward Pass Works
-
-### Key Difference from Traditional Neural Networks
-
-In a traditional NN, weights live in **layer-to-layer matrices** owned by the network. Here, weights live **inside each cell's dendrites** — a flat 1D array (`self.weights`) that the cell owns, carries, and updates independently. There is no global weight matrix.
-
-### The Grid
+## The Grid
 
 ```
          Layer 0       Layer 1       Layer 2      ...   Layer N-2     Layer N-1
@@ -349,7 +332,7 @@ Layers 1 through N-2 are the hidden layers where cells live, learn, and die.
 
 ---
 
-### Forward Pass (one cell's perspective)
+## How the Forward Pass Works (one cell's perspective)
 
 Each cell looks at the layer **above** it (closer to input), gathers charges from
 nearby cells within its dendrite reach, and computes its own charge.
@@ -399,6 +382,8 @@ High slope (0.3) = permissive neuron, passes more signal through.
 
 **Step 5: Update cell memory.** The new charge is pushed to the cell's charge history array. Rolling `max_charge_diff` is recomputed (max − min of recent charges). `contributionScore` is recomputed as `max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`.
 
+---
+
 ### Weight Indexing
 
 Weights are stored in a flat 1D array. The 2D offset (dx, dy) from the cell
@@ -419,13 +404,13 @@ indices 0–24 over a 5×5 grid of upstream positions.
 
 ---
 
-### Backward Pass (one cell's perspective)
+## How the Backward Pass Works (one cell's perspective)
 
 Backpropagation has two jobs: (1) compute this cell's error signal, and
 (2) update this cell's weights. It works from the output layer back toward
 the input layer.
 
-#### Job 1: Compute Error Signal
+### Job 1: Compute Error Signal
 
 **Output layer cells** (layer N-2): error = how wrong we are.
 
@@ -456,10 +441,9 @@ Cell X accumulates error from each cell below that connects to it:
             × leaky_ReLU_derivative(my_charge)
 ```
 
-**Why `reversed_index`?** In the forward pass, Cell 5 (below) uses Cell X's
-charge via weight_index to compute Cell 5's charge. In the backward pass,
-we need the reverse: Cell X needs Cell 5's error via the **same connection**,
-but looked up from Cell 5's weight array in the opposite direction:
+### Why `reversed_index`?
+
+In the forward pass, Cell 5 (below) uses Cell X's charge via `weight_index` to compute Cell 5's charge. In the backward pass, we need the reverse: Cell X needs Cell 5's error via the **same connection**, but looked up from Cell 5's weight array in the opposite direction:
 
 ```
     reversed_index = len(cell_below.weights) − 1 − weight_index
@@ -477,7 +461,7 @@ but looked up from Cell 5's weight array in the opposite direction:
     the weight matrix — exactly what standard backprop does.
 ```
 
-#### Job 2: Update Weights
+### Job 2: Update Weights
 
 Once Cell X knows its error, it updates each of its own dendritic weights
 using the upstream cell charges (same cells used in the forward pass):
@@ -496,7 +480,9 @@ using the upstream cell charges (same cells used in the forward pass):
 In autonomous mode, `learning_rate` comes from gene 9 and `weight_decay`
 from gene 8 — each cell runs its own gradient descent at its own speed.
 
-**Step 3: Update cell memory.** After weight updates, `updateGradientImportance()` pushes |gradient| to the rolling history, recomputes `avg_gradient_magnitude`, and recomputes `contributionScore`.
+### Job 3: Update Cell Memory
+
+After weight updates, `updateGradientImportance()` pushes |gradient| to the rolling history, recomputes `avg_gradient_magnitude`, and recomputes `contributionScore`.
 
 ---
 
@@ -528,88 +514,136 @@ from gene 8 — each cell runs its own gradient descent at its own speed.
 
 ---
 
-## Module Structure (Python Desktop)
+## 3D Visualization Color Modes
 
-```
-neurosim/
-  __init__.py           Package init
-  config.py             SimConfig dataclass + grid constants
-  state.py              SimState dataclass + neighbor cache
-  cell.py               Cell class: 14 genes, 5 proteins, 6 cell memory fields, forward/backward/die
-  training.py           Forward/backward propagation loops
-  evolution.py          Andromida mode: breeding, crossover, mutation, death
-  io_manager.py         Save/load networks, MNIST data loading
-  visualization.py      2D cell rendering + statistics overlay
-  visualization_3d.py   3D OpenGL rendering (cached vertex arrays, HUD)
-  ui.py                 Input dialogs, side panel
-  telemetry.py          Per-layer validation and NaN detection
-  main.py               Event loop + entry point
-  smoke_test.py         Regression tests
-```
+Press **G** in 3D view to cycle through five color modes:
 
-## Data Preparation
+| Mode | What It Shows | Color Mapping |
+|------|--------------|---------------|
+| **Charge** | Cell activation level | Dark (low) → Bright (high charge) |
+| **Error** | Backprop error signal | Blue (negative) → Dark (zero) → Red (positive) |
+| **Gradient** | Learning signal strength | Dark (low \|gradient\|) → Green (high \|gradient\|) |
+| **Weight Strength** | Average absolute weight | Dark (near-zero weights) → Yellow (strong weights) |
+| **Contribution** | Combined activity × learning score | Dark (low) → Cyan (medium) → White (high contribution) |
 
-MNIST and Fashion-MNIST data must be preprocessed into per-image pickle files. Scripts are in `old_code/`:
-
-- `JMR_fashion_mnist_to_cell_Oct_3_from_webdata.py` — Fashion-MNIST
-- `JMR_pick_mnist_to_cell_Oct_23.py` — MNIST digits
-- `importMNEST_Save_local.py` — Raw MNIST download
-
-## Results
-
-- **MNIST digits:** 100/100 correct on 6-layer network with 25 weights/cell
-- **Fashion-MNIST:** 98/100 on similar architecture
-- Networks survive save/reload and can continue training or evolution
+Key **4** activates the backprop learning view: switches to 3D, sets color mode to **Error** so you see the full network update in real time as each training sample is processed. Press **G** to cycle to other modes while in this view.
 
 ---
 
-## Browser Version (JavaScript / Single-File HTML)
+## V Key: Statistics Views
 
-### Try it now — no install required
+Press **V** to cycle through three statistics screens:
 
-**[▶ Run in your browser](https://jmrothberg.github.io/3D-neuron-game-of-life-simulator/neurosim_web.html)**
+### Screen 0: Current Settings + Pruning Readiness
+Shows all current config values alongside network-measured suggestions (`← net: X`). Includes:
+- Key learning parameters (LR, bias range, weight decay, etc.)
+- Pruning thresholds with `[gene 12]` and `[gene 13]` labels
+- Network measurements (cells, avg fan-in, median gradient/weight/charge/error)
+- **Pruning Readiness:** "Would die" counts for each pruning strategy at current settings
+- Contribution score percentile distribution (p10, p25, p50, p75, p90, max)
 
-The link opens the simulator on GitHub Pages. Press **M** → **D** → **OK** to auto-fetch the bundled 500-sample MNIST demo, then **T** to start training. Everything runs client-side in your browser — no server, no Python, no downloads.
+### Screen 1: Per-Layer Averages
+Detailed per-layer statistics: average charge, error, gradient, weight, fan-in, silent neuron count, weight utilization.
+
+### Screen 2: Cell Types
+Cell type census and per-digit accuracy breakdown.
+
+All screens include footnotes explaining when metrics are measured (snapshot vs rolling average) and how pruning differs from display metrics.
 
 ---
 
-### Overview
-
-The web version is a full reimplementation of the desktop `neurosim/` simulator in JavaScript + HTML Canvas + Three.js. All simulation logic lives in **`neurosim_web.js`**; the build script `build_neurosim_web.py` inlines it (plus help text from `get_help_defs.py`) into the standalone **`neurosim_web.html`**.
-
-### Key Features (Web Version)
+## Training Features
 
 | Feature | Details |
 |---------|---------|
-| **Full neural-network training** | Forward pass, backpropagation, weight/bias updates, cross-entropy loss — identical algorithm to the Python version |
+| **Full neural-network training** | Forward pass, backpropagation, weight/bias updates, cross-entropy loss |
 | **14 heritable genes** | All 14 genes (breeding, network, learning, pruning) with autonomous/non-autonomous modes |
-| **5 pruning strategies** | Activity, gradient, weight-magnitude, contribution-score, and percentile pruning — all configurable via C key |
+| **5 pruning strategies** | Activity, gradient, weight-magnitude, contribution-score, and percentile — all configurable via **C** key |
 | **Epoch-based training loop** | One epoch = one full pass over all loaded samples; epochs are counted and displayed in the status bar |
-| **Minibatch gradient accumulation** | Configurable batch size **K** (gradient_minibatch_size); gradients accumulate over K samples before one weight update |
+| **Minibatch gradient accumulation** | Configurable batch size **K** (key **K**); gradients accumulate over K samples before one weight update |
 | **Epoch shuffling** | Training samples are Fisher-Yates shuffled at the start of each epoch |
-| **Dual loss plots** | Separate scrolling plots for per-minibatch loss (blue) and per-epoch loss (green), each with an independent Y-axis scale slider |
-| **Live status bar** | Shows: display toggle, current epoch with progress, total samples, minibatch K, epoch loss, batch loss, correct predictions, max correct |
-| **Dedicated statistics pane** | Right panel split into Help (top) and Stats (bottom) with draggable splitter; stats show pruning readiness, per-layer metrics, contribution score distribution |
-| **Smart defaults with suggestions** | `suggestParams()` scans the network and suggests LR, bias range, weight decay, pruning thresholds based on live measurements. Shown in E, I, C dialogs and V screen |
-| **5 color modes in 3D** | Charge, Error, Gradient, Weight Strength, Contribution — cycle with G key |
-| **He initialization** | Weight reset (X key) measures average effective fan-in and scales as `randn × √(2/fan_in)` |
-| **Compact MNIST format** | Training JSON stores only pixel charges + label per sample (~2 MB / 500 samples); auto-detected on load |
-| **Demo data fetch** | **M** → **D** fetches `mnist_demo_500.json` from the server (works on GitHub Pages and local HTTP) |
-| **3D visualization** | Three.js orbit-camera view with round point sprites, visible connection lines, and backprop highlight mode (4 key) |
+| **Dual loss plots** | Separate scrolling plots for per-minibatch loss (blue) and per-epoch loss (green), each with an independent Y-axis scale slider (0.1–20) |
+| **He initialization** | Weight reset (**X** key) measures average effective fan-in and scales as `randn × √(2/fan_in)` |
+| **Smart defaults with suggestions** | `suggestParams()` scans the network and suggests LR, bias range, weight decay, pruning thresholds. Shown in **E**, **I**, **C** dialogs and **V** screen |
 | **Save / Load** | **S** exports full network state as JSON; **L** imports it; auto-downloads a snapshot when accuracy hits 100% |
-| **Display toggle** | **D** key toggles only expensive cell rendering; training, graphs, and status bar always update |
+| **Save filename convention** | Prefix = accuracy tier letter (P = perfect, A–J = tiers, N = none, X = unknown) + dataset letter (M/F/S/U/X) |
 
-### Building the Standalone HTML
+---
+
+## Typical Workflow
+
+1. Open `neurosim_web.html` (browser) or the GitHub Pages link
+2. Load a saved network (**L**) or draw cells manually (click/drag on the grid)
+3. Load training data (**M**) — choose **D** for demo, **J** for your own MNIST JSON
+4. Set forward direction (**F**), enable backprop (**B**), start training (**T**)
+5. Check **V** screen for pruning readiness before enabling pruning
+6. Toggle pruning (**P** for activity/weight/contribution, **O** for gradient) to remove dead cells
+7. Use **C** to tune pruning thresholds (suggestions shown from network analysis)
+8. Disable display (**D**) for faster training — plots and status bar keep updating
+9. Watch accuracy climb — save good networks (**S**)
+
+---
+
+## Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| **Space** | Toggle running mode (enables evolution loop: Andromida birth/death + pruning) |
+| **A** | Toggle Andromida mode (genetic birth/death using cell genes) |
+| **T** | Toggle training mode (forward pass + optional backprop) |
+| **B** | Toggle backpropagation (error signal + weight updates) |
+| **F / R** | Forward / Reverse charge flow direction |
+| **P** | Toggle activity-based pruning (kills cells with low charge change, low weight magnitude, low contribution score) |
+| **O** | Toggle gradient-based pruning (kills cells with low gradient) |
+| **=** | Toggle prune logic between AND/OR (for charge-based pruning) |
+| **C** | Change pruning parameters: charge delta, gradient threshold, min contribution score, prune percentile |
+| **U** | Toggle autonomous cell genes (per-cell vs global parameters) |
+| **M** | Load training data — **J** (file), **D** then **M** or **F** (hosted MNIST / Fashion demo JSON), or **M** (synthetic) |
+| **K** | Set gradient minibatch size (accumulate gradients over K samples) |
+| **G** | 2D: switch genes/proteins display. 3D: cycle color mode (Charge → Error → Gradient → Weight Strength → Contribution) |
+| **V** | Cycle statistics views (Settings + Pruning Readiness / Averages / Cell Types) |
+| **E** | Edit all parameters interactively (with network-measured suggestions) |
+| **I** | Change learning rate (with suggestion based on fan-in) |
+| **X** | Reset network weights/biases (He initialization, auto-computes scaling) |
+| **N** | Nuke all hidden layer cells |
+| **S / L** | Save / Load network state (JSON) |
+| **W** | Reset gradient tracking for all cells |
+| **D** | Toggle display updating (training + plots always run; only expensive cell rendering is toggled) |
+| **3** | Toggle 3D Three.js view |
+| **4** | Toggle 3D backprop visualization (full network, Error color mode by default) |
+| **Q** | Dump per-layer telemetry report to stats pane |
+| **H** | Jump to next **##** heading in the README help panel (2D only) |
+| **?** | Scroll help panel to top |
+| **Mouse** | Left-click: place/remove cells. Right-click/Ctrl+click: inspect cell. Drag: paint cells |
+
+---
+
+## Files and Build
+
+| File | Role |
+|------|------|
+| `README.md` | **Canonical manual** — rendered as the in-app help preview (Markdown → HTML at build time) |
+| `neurosim_web.js` | All simulation, training, visualization, and UI logic |
+| `build_neurosim_web.py` | Reads `README.md` + `neurosim_web.js`, writes `neurosim_web.html` (requires `pip install markdown`) |
+| `get_help_defs.py` | Legacy duplicate of early help strings; **not** used by the build — kept for reference only |
+| `mnist_to_neurosim_web_json.py` | Downloads MNIST/Fashion-MNIST and writes compact JSON training files |
+| `mnist_demo_500.json` | Bundled MNIST demo (500 samples); **M** → **D** → **M** |
+| `fashion-mnist_demo_500.json` | Bundled Fashion-MNIST demo (500 samples); **M** → **D** → **F** |
+| `neurosim_web.html` | Built output — single-file app (HTML + CSS + JS inline) |
+| `neurosim_python/` | Legacy Python/pygame desktop version (see its own README) |
+
+### Building the standalone HTML
 
 ```bash
+python3 -m pip install markdown   # once — converts README.md for the help panel
 python3 build_neurosim_web.py
 ```
 
-This reads `neurosim_web.js` and `get_help_defs.py`, injects help text as a `HELP_SCREEN` JSON object, and produces `neurosim_web.html`. Re-run after editing `neurosim_web.js`.
+Re-run after editing `README.md`, `neurosim_web.js`, or styles inside `build_neurosim_web.py`.
 
-### Running Locally
+### Running locally
 
-**Option A — direct open:** Double-click `neurosim_web.html`. Works for most features, but Chromium may block some `file://` loads (see troubleshooting below).
+**Option A — direct open:** Double-click `neurosim_web.html`. Works for most features, but Chromium may block some `file://` loads.
 
 **Option B — local HTTP server (recommended):**
 
@@ -620,34 +654,44 @@ python3 -m http.server 8765
 
 This avoids all `file://` security restrictions and enables the **M** → **D** demo-fetch path.
 
-### Loading MNIST Training Data
+---
 
-**Quick (demo, 500 samples):** Press **M** → **D** → **OK**. The 500-sample compact JSON is fetched automatically.
+## Loading MNIST Training Data
 
-**Full dataset (up to 5000 samples):** Generate a local file with the conversion script:
+**Quick demo (500 samples):** Press **M** → **D** → OK, then choose **M** for `mnist_demo_500.json` or **F** for `fashion-mnist_demo_500.json` (both ship in the repo for GitHub Pages).
+
+**Full dataset (up to 5000+ samples):** Generate a local file with the conversion script:
 
 ```bash
 python3 mnist_to_neurosim_web_json.py --dataset mnist --count 5000 -o mnist_training_web.json
 # Fashion-MNIST: --dataset fashion
 # SSL issues: add --no-verify-ssl
+# Custom slice: --offset 1000 --count 2000
 ```
 
-Then press **M** → **J** → select the file. Options: `--offset`, `--count`, `--cache-dir`.
+Then press **M** → **J** → select the file.
 
 The compact format (default) stores only charge values and labels — ~22 MB for 5000 samples vs ~1.9 GB verbose. Use `--verbose-cells` for the old format if needed.
 
-### Troubleshooting
+---
+
+## Troubleshooting
 
 **`file://` security errors:** Chromium may log *"Unsafe attempt to load URL … 'file:' URLs are treated as unique security origins"*. Each `file://` path is treated as its own origin, so subframe loads and fetch calls can fail. **Fix:** serve the repo over HTTP (`python3 -m http.server 8765`) and open via `http://localhost:8765/neurosim_web.html`.
 
-**Large JSON files crashing the browser:** If you generated verbose-format JSON for thousands of samples, the file can be 1+ GB. Use the compact format (default in `mnist_to_neurosim_web_json.py`) or reduce `--count`.
+**Large JSON files crashing the browser:** If you generated verbose-format JSON for thousands of samples, the file can be 1+ GB. Use the compact format (default) or reduce `--count`.
 
-### Known Gaps vs Desktop
+**Loading a network during training:** Safe — the epoch counter resets automatically so training resumes cleanly from epoch 0.
 
-- Pickle **saved_states/** and per-run **.png** icons are desktop-only; **L** loads JSON exported with **S**
-- MNIST in pygame reads prepared pickle folders (**M** → **M** vs **F**); the browser uses **J**/**D** + JSON
-- `state.timing` evolution prints are not wired to the UI
-- Float RNG differs from NumPy; 3D backprop highlight differs from OpenGL; tab close replaces pygame quit
+---
+
+## Results
+
+- **MNIST digits:** 100/100 correct on 6-layer network with 25 weights/cell
+- **Fashion-MNIST:** 98/100 on similar architecture
+- Networks survive save/reload and can continue training or evolution
+
+---
 
 ## Author
 

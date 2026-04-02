@@ -24,8 +24,9 @@
     #statusDock { flex: 0 0 auto; background: #000; color: #cfc; font: 12px/1.3 monospace; padding: 6px 8px; border-top: 1px solid #333; }
     #statusLines { line-height: 1.25; }
     #colSplitter { flex: 0 0 6px; width: 6px; cursor: col-resize; background: #444; border: solid #222; border-width: 0 1px; }
-    #side { flex: 0 0 500px; width: 500px; min-width: 260px; max-width: 92vw; background: #e8e8e8; color: #111; display: flex; flex-direction: column; font: 13px/1.35 monospace; padding: 0; min-height: 0; height: 100vh; box-sizing: border-box; }
-    #helpScroll { flex: 1 1 60%; min-height: 40px; margin: 0; padding: 10px; overflow-y: auto; white-space: pre-wrap; font: 13px/1.45 system-ui, sans-serif; }
+    #side { flex: 0 0 500px; width: 500px; min-width: 260px; max-width: 92vw; background: #e8e8e8; color: #111; display: flex; flex-direction: column; font: 13px/1.35 system-ui, sans-serif; padding: 0; min-height: 0; height: 100vh; box-sizing: border-box; }
+    /* Help = README.md preview (markdown HTML) + session log */
+    #helpScroll { flex: 1 1 60%; min-height: 40px; margin: 0; padding: 10px 12px; overflow-y: auto; overflow-x: auto; white-space: normal; color: #111; }
     #sideSplitter { flex: 0 0 5px; height: 5px; cursor: row-resize; background: #999; border: solid #bbb; border-width: 1px 0; }
     #statsScroll { flex: 1 1 40%; min-height: 40px; margin: 0; padding: 10px; overflow-y: auto; white-space: pre-wrap; font: 12px/1.35 monospace; background: #dde8dd; color: #111; }
     #modalMask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); align-items: center; justify-content: center; z-index: 100; }
@@ -35,6 +36,33 @@
     #filePick { display: none; }
     .row { margin-top: 8px; }
     button { margin-right: 6px; }
+    /* README markdown preview */
+    #helpScroll .quick-start { background: #e8f2fc; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; border: 1px solid #9bd; }
+    #helpScroll .quick-start .quick-h { margin: 0 0 6px 0; font-size: 1rem; color: #024; }
+    #helpScroll .quick-start .quick-pre { margin: 0; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+    #helpScroll .readme-body { max-width: 100%; line-height: 1.45; }
+    #helpScroll .readme-body h1 { font-size: 1.28rem; margin: 0.9em 0 0.35em; padding-bottom: 4px; border-bottom: 2px solid #89a; color: #012; }
+    #helpScroll .readme-body h2 { font-size: 1.08rem; margin: 1em 0 0.3em; color: #023; scroll-margin-top: 6px; }
+    #helpScroll .readme-body h3 { font-size: 0.98rem; margin: 0.85em 0 0.25em; color: #034; }
+    #helpScroll .readme-body h4 { font-size: 0.92rem; margin: 0.75em 0 0.2em; }
+    #helpScroll .readme-body p { margin: 0.45em 0; }
+    #helpScroll .readme-body ul, #helpScroll .readme-body ol { margin: 0.4em 0; padding-left: 1.35em; }
+    #helpScroll .readme-body li { margin: 0.2em 0; }
+    #helpScroll .readme-body hr { border: none; border-top: 1px solid #bbb; margin: 1em 0; }
+    #helpScroll .readme-body blockquote { margin: 0.5em 0; padding: 4px 10px; border-left: 3px solid #89a; background: #f4f6f8; color: #222; }
+    #helpScroll .readme-body table { border-collapse: collapse; width: 100%; font-size: 11px; margin: 0.65em 0; max-width: 100%; }
+    #helpScroll .readme-body thead { background: #dde8f0; }
+    #helpScroll .readme-body th, #helpScroll .readme-body td { border: 1px solid #aab; padding: 4px 6px; vertical-align: top; text-align: left; }
+    #helpScroll .readme-body tr:nth-child(even) { background: rgba(0,0,0,0.03); }
+    #helpScroll .readme-body pre { overflow-x: auto; background: #f0f2f5; padding: 8px 10px; border-radius: 4px; font: 11px/1.28 ui-monospace, monospace; margin: 0.6em 0; border: 1px solid #ccd; white-space: pre; }
+    #helpScroll .readme-body code { background: #eaecef; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; font-family: ui-monospace, monospace; }
+    #helpScroll .readme-body pre code { background: none; padding: 0; font-size: inherit; }
+    #helpScroll .readme-body a { color: #06c; }
+    #helpScroll .readme-body strong { font-weight: 600; }
+    #helpScroll .readme-fallback { white-space: pre-wrap; font: 12px ui-monospace, monospace; }
+    #helpScroll .help-sep { border: none; border-top: 2px solid #999; margin: 16px 0 10px; }
+    #helpScroll .help-log-h { font-size: 0.95rem; margin: 0 0 6px 0; color: #222; }
+    #helpScroll .help-log { white-space: pre-wrap; font: 11px ui-monospace, monospace; margin: 0; padding: 8px; background: #fafafa; border: 1px solid #ccc; border-radius: 4px; max-height: min(28vh, 220px); overflow-y: auto; color: #111; }
   </style>
 </head>
 <body>
@@ -46,8 +74,8 @@
       </div>
       <div id="plotStrip">
         <div id="plotControls">
-          <label class="plotLab">Epoch Y-scale<input type="range" id="plotYEpoch" min="1" max="200" step="1" value="50" /></label>
-          <label class="plotLab">Minibatch Y-scale<input type="range" id="plotYMinibatch" min="1" max="200" step="1" value="50" /></label>
+          <label class="plotLab">Epoch Y-scale<input type="range" id="plotYEpoch" min="0.1" max="20" step="0.1" value="10" /></label>
+          <label class="plotLab">Minibatch Y-scale<input type="range" id="plotYMinibatch" min="0.1" max="20" step="0.1" value="10" /></label>
         </div>
         <div id="predBatchWrap" title="Mean loss per full epoch — one pass over all training samples (green)">
           <canvas id="predBatch" width="1008" height="72"></canvas>
@@ -62,7 +90,7 @@
     </div>
     <div id="colSplitter" title="Drag to resize panels"></div>
     <div id="side">
-      <pre id="helpScroll"></pre>
+      <div id="helpScroll"></div>
       <div id="sideSplitter" title="Drag to resize help / stats"></div>
       <pre id="statsScroll"></pre>
     </div>
@@ -80,11 +108,11 @@
   </div>
   <input id="filePick" type="file" accept=".json,application/json" />
 <script>
-const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding Tolerance (OT): This gene \n    determines the maximum number of \n    neighbors a cell can have before it \n    dies due to overcrowding.\n    For example, if OT = 3, the cell will \n    die if it has more than 3 neighbors.\n\n    Isolation Tolerance (IT): This gene \n    determines the minimum number of \n    neighbors a cell needs to survive.\n    For example, if IT = 2, a cell with \n    fewer than 2 neighbors will die.\n\n    Birth Threshold (BT): This gene \n    determines the number of neighbors an \n    empty grid space needs to produce a \n    new cell. If an empty space has \n    exactly this many neighbors, a new \n    cell will be born.\n    For example, if BT = 3, a new cell \n    will be born in an empty space that \n    has exactly 3 neighbors. And inherit \n    the genes by recombination between two \n    parents ONE of whom could give it the \n    BT = 3 allele.\n\n    Mutation Rate (MR): This gene\n    determines the chance of a cell's\n    genes mutating. Two contexts:\n    - At BIRTH: chance = MR / 1000\n      (germline mutation during crossover)\n    - During LIFE: chance = MR / 100000\n      (somatic mutation each evolution tick)\n\n    A \"germ-line\" mutation in the BT gene\n    gives a new cell the chance to be BORN\n    even if neither parent had a BT gene\n    value allowing it to be born in that\n    position.\n    Not until the next cycle will a cell\n    be checked for OT & IT. So many cells\n    are born that die in the next cycle.\n\n    Somatic mutation: any gene randomly\n    changes -- breeding genes to a new\n    allele in the configured range, network\n    genes re-randomized per their type.", "jmr_defs2": "Cells inherit these genes from their\n    parent cells (random independent\n    selection of two parents if multiple\n    are available, and then independent\n    assortment of genes), with a chance of\n    (germline) mutation based on their\n    inherited Mutation Rate each cycle.\n\n    The world is made up of 3D grid of\n    potential cells. Each cell has a set\n    of genes that determine its behavior.\n    Each cell is displayed as an\n    informative 3 x 3 arrangement of\n    colored blocks.\n\n    3x3 Display:  OT      IT      BT\n                  MR      Charge  Error\n                  Bias    Weight  Gradient\n\n    -- Breeding Genes (always per-cell) --\n    Overcrowding Tolerance (OT): .genes[0]\n    neighbors <= OT (cell dies if more)\n    Isolation Tolerance (IT)   : .genes[1]\n    neighbors >= IT (cell dies if fewer)\n    Birth Threshold (BT)       : .genes[2]\n    neighbors == BT for birth\n\n    OT >= neighbors >= IT, OT > IT\n\n    -- Network Genes (per-cell when U on) --\n    Mutation Rate (MR)         : .genes[3]\n    Dendrite Size (WG)         : .genes[4]\n    Bias Range (BR)            : .genes[5]\n    Fan-In / Avg Weights (AW)  : .genes[6]\n    Charge Delta (CD)          : .genes[7]\n    Weight Decay (WD)          : .genes[8]\n    Learning Rate (LR)         : .genes[9]\n    Gradient Threshold (GT)    : .genes[10]\n    Activation Slope (AS)      : .genes[11]", "conways_defs": "Original Conway's Game of Life has\n    fixed rules for all cells:\n\n    Overcrowding (OT=3): Any cell with\n    more than 3 neighbors dies.\n    Isolation (IT=2): Any cell with\n    fewer than 2 neighbors dies.\n    Birth (BT=3): Empty space with\n    exactly 3 neighbors spawns a cell.\n\n    In Conway's: no genes, no mutation,\n    no evolution. Rules are static.\n\n    JMR's version makes OT, IT, BT into\n    per-cell GENES that are inherited:\n    OT: .genes[0]  neighbors <= OT\n    IT: .genes[1]  neighbors >= IT\n    BT: .genes[2]  neighbors == BT\n\n    Survival: IT <= neighbors <= OT\n    (with OT > IT enforced)", "how_network_works": "HOW THE NETWORK IS DIFFERENT\n\n    In a traditional NN, weights live in\n    layer-to-layer matrices owned by the\n    network. Here, weights live INSIDE\n    each cell's dendrites -- a flat 1D\n    array (self.weights) that the cell\n    owns, carries, and updates itself.\n\n    The Grid:\n    Layer 0    Layer 1..N-2   Layer N-1\n    (Input)    (Hidden)       (Desired)\n    MNIST  --> cells learn --> labels\n    pixels     & evolve       (0-9)\n\n    Training data loaded into layer 0.\n    Desired outputs loaded into layer N-1.\n    Cells in layers 1 to N-2 learn to\n    map inputs to outputs by adjusting\n    their own weights via backprop.\n\n    Each cell has its own learning rate\n    (gene 9), weight decay (gene 8), and\n    activation curve (gene 11). No global\n    optimizer -- each cell runs its own\n    gradient descent.", "forward_pass": "FORWARD PASS (one cell's view)\n\n    Cell X looks at the layer ABOVE it\n    and gathers charges from neighbors\n    within its dendrite reach:\n\n    Layer above:        This cell:\n     [A][B][C]\n     [D][E][F] ---->    Cell X\n     [G][H][I]          at (x,y)\n     3x3 reach\n     (gene 4 = 9)\n\n    Step 1: Gather upstream charges\n      (skip empty positions)\n\n    Step 2: Weighted sum + bias\n      charge = bias\n            + A.charge * w[0]\n            + B.charge * w[1]\n            + ... + I.charge * w[8]\n\n    Step 3: Leaky ReLU activation\n      if charge > 0: keep it\n      if charge < 0: charge *= slope\n        (gene 11 controls slope)\n\n    Step 4: Clip to [-10, 10], store\n\n    Weight index formula:\n      idx = (dx+reach)*matrix + (dy+reach)\n      (-1,-1)->0  (-1,0)->1  (-1,+1)->2\n      ( 0,-1)->3  ( 0,0)->4  ( 0,+1)->5\n      (+1,-1)->6  (+1,0)->7  (+1,+1)->8", "how_backprop_works": "BACKWARD PASS: 2 JOBS PER CELL\n\n    Job 1: COMPUTE ERROR SIGNAL\n    Output layer (N-2):\n      error = (my_charge - desired)\n              * ReLU_derivative(charge)\n\n    Hidden layers:\n      Look at cells BELOW (layer+1).\n      They already have their errors.\n      error = SUM(cell_below.error\n        * cell_below.weights[rev_idx])\n        * ReLU_derivative(my_charge)\n\n    Job 2: UPDATE MY WEIGHTS\n    Look at cells ABOVE (layer-1).\n    For each upstream cell:\n      gradient = my_error * upstream.charge\n      w[idx] -= lr * gradient + decay * w\n      bias   -= lr * my_error\n\n    lr = gene 9, decay = gene 8\n    (per-cell in autonomous mode)", "how_backprop_works2": "WHY reversed_index WORKS\n\n    Forward: Cell 5 (below) looks UP\n    at Cell X through weight_index:\n      idx = (dx+reach)*m + (dy+reach)\n\n    Backward: Cell X looks DOWN at\n    Cell 5 through reversed_index:\n      rev = len(w) - 1 - idx\n\n    For 3x3 weights:\n      fwd 0 <-> rev 8  (-1,-1)<->(+1,+1)\n      fwd 1 <-> rev 7  (-1, 0)<->(+1, 0)\n      fwd 4 <-> rev 4  ( 0, 0)<->( 0, 0)\n      fwd 8 <-> rev 0  (+1,+1)<->(-1,-1)\n\n    This maps (dx,dy) to (-dx,-dy).\n    Same as transposing the weight\n    matrix -- exactly what standard\n    backprop does, but computed from\n    the flat 1D array stored in each\n    cell's dendrites.\n\n    FULL PICTURE:\n    Layer above    This cell    Layer below\n     [A][B][C]                   [1][2][3]\n     [D][E][F]      Cell X       [4][5][6]\n     [G][H][I]     error=?       [7][8][9]\n        |                            |\n        v                            v\n    update X's      compute X's error\n    weights using   from below cells'\n    A-I charges     errors + weights", "controls": "Left-click/Drag - Place cells\n    Right-click/Ctrl+click - Inspect cell\n    Close Window - Quit\n\n    Space - Toggle Running (evolution loop)\n    while running:\n        U - Toggle Autonomous Network Genes\n        A - Toggle Andromida mode (genetic\n            birth/death rules)\n        C - Change Charge Delta & Gradient\n            Threshold\n        P - Toggle Activity Prune (charge)\n        = - Toggle Prune Logic AND/OR\n        O - Toggle Gradient Prune\n\n    T - Toggle Training\n        I - Set Learning Rate\n        F - Forward Prop direction\n        R - Reverse Prop direction\n        B - Toggle Back Prop\n\n    G - Toggle Protein/Gene display\n    X - Reset network genes and proteins\n    D - Toggle Display updates\n    V - Cycle statistics views\n    H - Scroll through help screens\n    W - Reset gradient tracking\n    Q - Dump telemetry report\n    L - Load layers\n    S - Save layers\n    M - Load MNIST training data\n    E - Enter Parameters\n    N - Nuke all cells\n    3 - Toggle 3D OpenGL view\n    4 - Toggle 3D backprop view"};
+const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Genetic Game of Neural Network Life</h1>\n<p>A bio-inspired neural network simulator where neurons are living cells with <strong>14 genes</strong>, <strong>5 proteins</strong>, and <strong>6 cell-memory fields</strong> that grow, connect, learn, and die on a 28×28 grid. Networks self-assemble through genetic rules, learn via backpropagation with weights stored <em>inside</em> each cell's dendrites, and are sculpted by environmental pruning — combining Conway's Game of Life mechanics with gradient descent.</p>\n<p><strong>100/100 on MNIST. 98/100 on Fashion-MNIST.</strong></p>\n<p><strong><a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://jmrothberg.github.io/3D-neuron-game-of-life-simulator/neurosim_web.html\">▶ Run in your browser — no install</a></strong><br />\nPress <strong>M</strong> → <strong>D</strong> → OK, then <strong>M</strong> (MNIST) or <strong>F</strong> (Fashion-MNIST) to load a bundled 500-sample demo, then <strong>T</strong> to train.</p>\n<p><strong>Legacy Python desktop version:</strong> see <a href=\"neurosim_python/README.md\"><code>neurosim_python/README.md</code></a>.</p>\n<hr />\n<h2 id=\"why-this-is-different\">Why This Is Different</h2>\n<p>Traditional neural networks are engineered: you choose the layer sizes, connectivity, and hyperparameters, then train a fixed weight matrix. <strong>This simulator inverts that.</strong> Cells are autonomous agents that:</p>\n<ol>\n<li><strong>Grow their own connections</strong> — each cell's dendrite size is encoded in its genes, not set by an architect</li>\n<li><strong>Are born and die</strong> — new cells emerge when conditions match their birth gene; cells die from overcrowding, isolation, or environmental pruning</li>\n<li><strong>Carry heritable genes</strong> — when two cells breed, offspring inherit genes via crossover and mutation</li>\n<li><strong>Store weights locally</strong> — weights live in each cell's dendrite array, not in a separate layer matrix</li>\n<li><strong>Set their own learning rate</strong> — each cell can evolve its own plasticity speed, gradient sensitivity, and activation curve</li>\n<li><strong>Set their own pruning sensitivity</strong> — each cell carries its own thresholds for weight-magnitude and contribution-score pruning (genes 12–13), allowing evolution to favor cells that resist or accept pruning pressure</li>\n<li><strong>Are sculpted by the environment</strong> — cells that don't contribute (low charge change, low gradient, near-zero weights, or low contribution score) are pruned, mimicking synaptic pruning during brain development</li>\n</ol>\n<p>The result is a network that <strong>self-organizes its own topology</strong> through genetic evolution, then learns through backpropagation, then gets pruned by environmental pressure — a cycle of growth, learning, and selection that mirrors biological neural development.</p>\n<hr />\n<h2 id=\"how-this-is-different-from-a-traditional-nn\">How This Is Different from a Traditional NN</h2>\n<p>Traditional NN: weights live in <strong>layer-to-layer matrices</strong> owned by the network. A global optimizer updates all weights at once.</p>\n<p>This simulator: weights live <strong>inside each cell's dendrites</strong> — a flat 1D array (<code>weights[]</code>) the cell owns and updates independently. There is no global weight matrix. Each cell runs its own gradient descent with its own learning rate (gene 9), weight decay (gene 8), and activation curve (gene 11).</p>\n<hr />\n<h2 id=\"the-cell-genes-proteins-and-cell-memory\">The Cell: Genes, Proteins, and Cell Memory</h2>\n<p>Every cell carries three types of information, inspired by molecular biology:</p>\n<ul>\n<li><strong>Genes (14 values)</strong> — inherited, stable parameters that define the cell's identity, structure, pruning sensitivity, and <strong>how protein state is created and updated</strong>. These are the cell's <em>genotype</em>.</li>\n<li><strong>Proteins (5 values)</strong> — dynamic <em>phenotype</em>: charge, error, bias, weights, gradient. Their <strong>layout, initialization, and dynamics are gene-programmed</strong>; their <strong>numerical values change</strong> every training step (see below).</li>\n<li><strong>Cell Memory (6 fields)</strong> — not a separate chemical layer: they are <strong>integrative traces of what the charge and gradient proteins have been doing</strong> over recent training (see below). Used for pruning and survival decisions.</li>\n</ul>\n<h3 id=\"how-genes-specify-proteins-expression-updates-and-cutoffs\">How genes specify proteins (expression, updates, and cutoffs)</h3>\n<p>In this model, <strong>proteins are not arbitrary numbers</strong> — they are <strong>generated and governed by alleles</strong> the same way real proteins are specified by the genome:</p>\n<table>\n<thead>\n<tr>\n<th>Idea</th>\n<th>Role of genes</th>\n<th>What still <strong>changes</strong> at the protein level</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Shape / count</strong></td>\n<td>Gene <strong>4</strong> (dendrite size) fixes how many <strong>weight</strong> slots exist; gene <strong>6</strong> + <strong>4</strong> set He scaling for <strong>initial weights</strong>; gene <strong>5</strong> sets the <strong>scale for initial bias</strong>.</td>\n<td>After init, <strong>each weight and bias value</strong> is free to move with learning.</td>\n</tr>\n<tr>\n<td><strong>Dynamics</strong></td>\n<td>Genes <strong>9</strong> (learning rate), <strong>8</strong> (decay), <strong>11</strong> (activation slope) set <strong>how</strong> charge is computed from inputs and <strong>how fast</strong> bias/weights move when gradients arrive.</td>\n<td><strong>Charge, error, gradient</strong> are recomputed every forward/backward step; <strong>weights</strong> and <strong>bias</strong> accumulate experience.</td>\n</tr>\n<tr>\n<td><strong>Cutoffs / thresholds</strong></td>\n<td>Genes <strong>7</strong>, <strong>10</strong>, <strong>12</strong>, <strong>13</strong> (or global config when <strong>U</strong> is off) hold <strong>fixed comparison levels</strong>: “enough activity,” “enough gradient,” “enough weight magnitude,” “enough contribution.” Those allele/config values <strong>do not replace</strong> the proteins — they are compared <strong>against</strong> quantities built from <strong>changing</strong> protein state (and from integrative memory derived from charge/gradient).</td>\n<td>The <strong>signals being tested</strong> (charge swings, avg |gradient|, max |weight|, contribution score) <strong>rise and fall</strong> with training; the <strong>bar</strong> often stays on the gene side.</td>\n</tr>\n</tbody>\n</table>\n<p>So: <strong>alleles supply architecture, initial scales, update rules, and threshold levels</strong>; <strong>proteins carry the evolving numbers</strong> that learning and activity produce. Cutoff <strong>values</strong> may be <strong>initialized from</strong> or <strong>stored as</strong> gene (or config) alleles, but the <strong>quantities being cut off</strong> live in the phenotype and <strong>can change</strong> every sample.</p>\n<h3 id=\"memory-which-proteins-store-what-and-how-cell-memory-fits\">Memory: which proteins store what (and how “cell memory” fits)</h3>\n<p><strong>Genes do not store experience.</strong> Experience is carried in <strong>protein-level state</strong> and in <strong>summaries derived from protein trajectories</strong> — a useful mental model is <strong>post-translational / activity-dependent modification</strong>: the genome is fixed, but what happens to the cell <strong>leaves marks in proteins and in slow variables built from protein readouts</strong>.</p>\n<p><strong>1. Long-term memory — stored directly in proteins</strong></p>\n<table>\n<thead>\n<tr>\n<th>Protein</th>\n<th>What is “remembered”</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Weights</strong></td>\n<td>Learned connection strengths; they persist and accumulate changes across samples. This is the main <strong>synaptic memory</strong> of the cell.</td>\n</tr>\n<tr>\n<td><strong>Bias</strong></td>\n<td>Learned resting offset; also persistent across samples.</td>\n</tr>\n</tbody>\n</table>\n<p>Together, <strong>weights</strong> and <strong>bias</strong> are where the network’s <strong>learned mapping</strong> actually lives.</p>\n<p><strong>2. Fast signaling — proteins that change every step (not “storage” in the archival sense)</strong></p>\n<table>\n<thead>\n<tr>\n<th>Protein</th>\n<th>Role</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Charge</strong></td>\n<td>Current activation after this forward pass — a <strong>snapshot</strong>, overwritten in meaning on the next image.</td>\n</tr>\n<tr>\n<td><strong>Error</strong></td>\n<td>Current backprop signal for this step.</td>\n</tr>\n<tr>\n<td><strong>Gradient</strong></td>\n<td>Immediate direction of plasticity for each weight slot this step.</td>\n</tr>\n</tbody>\n</table>\n<p>These are essential for learning, but they are <strong>not</strong> where the cell keeps a running record of the whole epoch by themselves.</p>\n<p><strong>3. Integrative “memory” — the six fields as traces of protein activity</strong></p>\n<p>The <strong>six cell-memory fields</strong> are <strong>not</strong> extra proteins in the table above. In biological terms, think of them as <strong>activity-dependent integration</strong> on top of the same phenotype: the cell <strong>watches its own charge and gradient proteins over time</strong> and updates rolling summaries.</p>\n<table>\n<thead>\n<tr>\n<th>Cell memory field</th>\n<th>Built from which proteins / behavior</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>max_charge_diff_forward</strong> / <strong>max_charge_diff_reverse</strong></td>\n<td>History of <strong>charge</strong> along forward vs reverse flow (range of firing over a sliding window).</td>\n</tr>\n<tr>\n<td><strong>avg_gradient_magnitude</strong></td>\n<td>History of <strong>|gradient|</strong> (how strongly the cell has been nudged to learn).</td>\n</tr>\n<tr>\n<td><strong>contributionScore</strong></td>\n<td>Combines charge-diff traces × average gradient magnitude (“active” × “learning”).</td>\n</tr>\n<tr>\n<td><strong>significant_charge_change_</strong><em> / </em><em>significant_gradient_change</em>*</td>\n<td>Sticky flags: “has <strong>charge-</strong> or <strong>gradient</strong>-related behavior ever crossed a threshold?” — like a long-lived mark once a pathway has been strongly engaged; used for Conway-style protection, not for the numeric pruning averages.</td>\n</tr>\n</tbody>\n</table>\n<p>So: <strong>weights and bias</strong> store <strong>what was learned</strong>; <strong>charge, error, gradient</strong> carry <strong>what is happening now</strong>; the <strong>six memory fields</strong> store <strong>compressed history of charge and gradient dynamics</strong> for pruning and scoring — conceptually aligned with <strong>post-translational, experience-dependent state</strong> without ever editing the genome.</p>\n<hr />\n<h3 id=\"the-14-genes\">The 14 Genes</h3>\n<p><strong>Genes are fixed after a cell is created.</strong> They do not change during training or backprop.</p>\n<p><strong>Two exceptions (real biology has these too):</strong></p>\n<ul>\n<li><strong>Germline mutation:</strong> When a new cell is born from two parents, gene 3 can trigger re-randomization of breeding or network genes (probability = <strong>MR / 1000</strong> per birth).</li>\n<li><strong>Somatic mutation:</strong> While a cell is alive, the same gene 3 can very rarely trigger a full gene re-init (probability = <strong>MR / 100,000</strong> per evolution step). This is 100× rarer than germline, matching biology where somatic mutations are uncommon events.</li>\n</ul>\n<p><strong>Gene 3 (mutation rate)</strong> therefore controls <strong>both</strong> offspring mutation (germline) and rare in-life mutation (somatic), at different rates.</p>\n<p>Genes 0–2 control <strong>survival and reproduction</strong> (Game of Life rules).\nGenes 3–8 control <strong>network structure and regularization</strong>.\nGenes 9–11 control <strong>learning dynamics</strong>.\nGenes 12–13 control <strong>pruning sensitivity</strong>.</p>\n<table>\n<thead>\n<tr>\n<th>Gene</th>\n<th>Name</th>\n<th>Symbol</th>\n<th>Controls</th>\n<th>Default (non-autonomous)</th>\n<th>Autonomous Range</th>\n<th>Biological Analogy</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>0</strong></td>\n<td>Overcrowding Tolerance</td>\n<td>OT</td>\n<td>Max alive neighbors before cell dies</td>\n<td>2–15 (random)</td>\n<td>2–15 (random)</td>\n<td>Apoptosis from contact inhibition</td>\n</tr>\n<tr>\n<td><strong>1</strong></td>\n<td>Isolation Tolerance</td>\n<td>IT</td>\n<td>Min alive neighbors before cell dies</td>\n<td>2–15 (≤ gene 0)</td>\n<td>2–15 (≤ gene 0)</td>\n<td>Death from lack of trophic factors</td>\n</tr>\n<tr>\n<td><strong>2</strong></td>\n<td>Birth Threshold</td>\n<td>BT</td>\n<td>Exact neighbor count to reproduce</td>\n<td>2–15 (random)</td>\n<td>2–15 (random)</td>\n<td>Morphogen concentration for mitosis</td>\n</tr>\n<tr>\n<td><strong>3</strong></td>\n<td>Mutation Rate</td>\n<td>MR</td>\n<td>Probability of gene mutation (germline and somatic)</td>\n<td>From config (10)</td>\n<td>0–99 (random)</td>\n<td>DNA repair fidelity</td>\n</tr>\n<tr>\n<td><strong>4</strong></td>\n<td>Dendrite Size</td>\n<td>WG</td>\n<td>Number of synaptic weights</td>\n<td>From config (9)</td>\n<td>9 or 25 or 49</td>\n<td>Dendritic arbor complexity</td>\n</tr>\n<tr>\n<td><strong>5</strong></td>\n<td>Bias Range</td>\n<td>BR</td>\n<td>Initial bias magnitude</td>\n<td>From config (0.01)</td>\n<td>0.001 or 0.01</td>\n<td>Resting membrane potential range</td>\n</tr>\n<tr>\n<td><strong>6</strong></td>\n<td>Fan-In</td>\n<td>AW</td>\n<td>Weight initialization scaling (He)</td>\n<td>From config (5)</td>\n<td>Count of connected upstream cells</td>\n<td>Synaptic normalization factor</td>\n</tr>\n<tr>\n<td><strong>7</strong></td>\n<td>Charge Delta</td>\n<td>CD</td>\n<td>Threshold for \"significant\" activity</td>\n<td>From config (0.01)</td>\n<td>10^uniform(−6,−2)</td>\n<td>Activity-dependent survival signal</td>\n</tr>\n<tr>\n<td><strong>8</strong></td>\n<td>Weight Decay</td>\n<td>WD</td>\n<td>L2 regularization strength</td>\n<td>From config (1e-5)</td>\n<td>10^uniform(−6,−4)</td>\n<td>Synaptic protein turnover rate</td>\n</tr>\n<tr>\n<td><strong>9</strong></td>\n<td>Learning Rate</td>\n<td>LR</td>\n<td>Synaptic plasticity speed</td>\n<td>From config (0.01)</td>\n<td>uniform(0.003, 0.05)</td>\n<td>Hippocampal vs cortical plasticity</td>\n</tr>\n<tr>\n<td><strong>10</strong></td>\n<td>Gradient Threshold</td>\n<td>GT</td>\n<td>Gradient-pruning survival threshold</td>\n<td>From config (1e-4)</td>\n<td>10^uniform(−8,−4)</td>\n<td>Neurotrophic factor receptor density</td>\n</tr>\n<tr>\n<td><strong>11</strong></td>\n<td>Activation Slope</td>\n<td>AS</td>\n<td>Leaky ReLU negative slope</td>\n<td>From config (0.01)</td>\n<td>uniform(0.01, 0.3)</td>\n<td>Neuron selectivity / response curve</td>\n</tr>\n<tr>\n<td><strong>12</strong></td>\n<td>Weight Prune Threshold</td>\n<td>WPT</td>\n<td>Min max-|weight| to survive pruning</td>\n<td>From config (0.01)</td>\n<td>10^uniform(−3,−1)</td>\n<td>Synaptic maintenance threshold</td>\n</tr>\n<tr>\n<td><strong>13</strong></td>\n<td>Min Contribution Score</td>\n<td>MCS</td>\n<td>Min contribution score to survive</td>\n<td>From config (0, off)</td>\n<td>10^uniform(−6,−2)</td>\n<td>Activity-dependent trophic requirement</td>\n</tr>\n</tbody>\n</table>\n<h4 id=\"gene-groups-explained\">Gene Groups Explained</h4>\n<p><strong>Genes 0–2 (Breeding):</strong> Always per-cell, even in non-autonomous mode. They govern the Conway's Game of Life dynamics — when cells are born, when they die from overcrowding or isolation.</p>\n<p><strong>Genes 3–8 (Network Structure):</strong> Define the physical architecture of each cell — how many dendrites it has, how weights are initialized and decay, and the threshold for \"significant\" charge activity.</p>\n<p><strong>Genes 9–11 (Learning Dynamics):</strong> Control how each cell learns. Gene 9 (Learning Rate) is the single most impactful gene — in autonomous mode, evolution can discover that deep-layer cells should learn slowly while output cells learn fast. Gene 11 (Activation Slope) controls neuron selectivity: low slope (0.01) = highly selective, suppresses negative signals; high slope (0.3) = permissive, passes more signal through.</p>\n<p><strong>Genes 12–13 (Pruning Sensitivity):</strong> These genes put pruning thresholds <em>inside</em> the cell. In non-autonomous mode, all cells share the same global values from config. In autonomous mode, each cell evolves its own sensitivity — cells can become more or less resilient to pruning pressure through natural selection. This is analogous to cells expressing different levels of trophic factor receptors: a cell with a low MCS (gene 13) is \"easy to satisfy\" and survives with minimal contribution, while a cell with a high MCS is under stronger pressure to contribute or die.</p>\n<h3 id=\"gene-4-dendrite-size-detail\">Gene 4 (Dendrite Size) Detail</h3>\n<p>Gene 4 determines <code>reach = (√genes[4] − 1) / 2</code>:</p>\n<table>\n<thead>\n<tr>\n<th>Gene 4 Value</th>\n<th>Weight Matrix</th>\n<th>Reach</th>\n<th>Receptive Field</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>9</td>\n<td>3×3</td>\n<td>1</td>\n<td>1 cell in each direction</td>\n</tr>\n<tr>\n<td>25</td>\n<td>5×5</td>\n<td>2</td>\n<td>2 cells in each direction</td>\n</tr>\n<tr>\n<td>49</td>\n<td>7×7</td>\n<td>3</td>\n<td>3 cells in each direction</td>\n</tr>\n<tr>\n<td>81</td>\n<td>9×9</td>\n<td>4</td>\n<td>4 cells in each direction</td>\n</tr>\n</tbody>\n</table>\n<h3 id=\"why-log-uniform-distributions-matter\">Why Log-Uniform Distributions Matter</h3>\n<p>Genes 7, 8, 10, 12, and 13 span multiple orders of magnitude. If you use a uniform random distribution over (say) 1e-8 to 1e-4, 99.99% of values land near the top. <strong>Log-uniform sampling</strong> (<code>10^uniform(a, b)</code>) ensures equal probability across each order of magnitude, producing genuine diversity in survival sensitivity, decay rate, and activity thresholds — exactly what evolution needs.</p>\n<hr />\n<h3 id=\"the-5-proteins\">The 5 Proteins</h3>\n<p>These are the cell's <em>expressed behavior</em>: their <strong>existence and update laws</strong> come from <strong>genes</strong> (above); the <strong>numbers in the table below</strong> change every forward/backward pass as training runs.</p>\n<table>\n<thead>\n<tr>\n<th>Protein</th>\n<th>Symbol</th>\n<th>What It Is</th>\n<th>How It Changes</th>\n<th>Range</th>\n<th>Biological Analogy</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Charge</strong></td>\n<td>—</td>\n<td>Activation signal</td>\n<td>Forward: <code>leaky_ReLU(bias + Σ(upstream_charge × weight))</code></td>\n<td>[−10, 10]</td>\n<td>Membrane potential / firing rate</td>\n</tr>\n<tr>\n<td><strong>Error</strong></td>\n<td>—</td>\n<td>Backprop error signal</td>\n<td>Backward: accumulated from downstream errors × reversed weights</td>\n<td>[−10, 10]</td>\n<td>Retrograde signaling molecules</td>\n</tr>\n<tr>\n<td><strong>Bias</strong></td>\n<td>—</td>\n<td>Baseline offset before activation</td>\n<td><code>bias -= lr × error</code> each backward step</td>\n<td>Initialized near 0</td>\n<td>Resting membrane potential</td>\n</tr>\n<tr>\n<td><strong>Weights</strong></td>\n<td>—</td>\n<td>Synaptic connection strengths (1D array, size = gene 4)</td>\n<td>He-init: <code>randn × √(2/fan_in)</code>. Update: <code>w -= lr × gradient + decay × w</code></td>\n<td>Unconstrained</td>\n<td>Synaptic receptor density</td>\n</tr>\n<tr>\n<td><strong>Gradient</strong></td>\n<td>—</td>\n<td>Most recent learning signal</td>\n<td><code>error × upstream_charge</code>, clipped to [−clip, +clip]</td>\n<td>[−clip, clip]</td>\n<td>Calcium/CaMKII activity level</td>\n</tr>\n</tbody>\n</table>\n<hr />\n<h3 id=\"the-6-cell-memory-fields\">The 6 Cell Memory Fields</h3>\n<p>These fields are the <strong>integrative traces</strong> described in <strong>Memory: which proteins store what</strong> — summaries of <strong>charge</strong> and <strong>gradient</strong> over time, not extra named proteins in the five-protein list. All pruning decisions read from them; the cell carries its own recent history of activity and plasticity.</p>\n<table>\n<thead>\n<tr>\n<th>Field</th>\n<th>What It Tracks</th>\n<th>How It's Updated</th>\n<th>Used By</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>max_charge_diff_forward</strong></td>\n<td>Max charge swing across forward-pass training samples</td>\n<td>Each forward pass: push charge, track running max − min over last epoch-worth of samples</td>\n<td>Activity pruning (P key), contribution score</td>\n</tr>\n<tr>\n<td><strong>max_charge_diff_reverse</strong></td>\n<td>Max charge swing across reverse-pass training samples</td>\n<td>Each reverse pass: push charge, track running max − min over last epoch-worth of samples</td>\n<td>Activity pruning (P key), contribution score</td>\n</tr>\n<tr>\n<td><strong>avg_gradient_magnitude</strong></td>\n<td>Rolling average of |gradient| over recent samples</td>\n<td>Each backward pass: push |gradient| to history window (size = training data count), compute mean</td>\n<td>Gradient pruning (O key), contribution score</td>\n</tr>\n<tr>\n<td><strong>contributionScore</strong></td>\n<td>Combined activity + learning signal</td>\n<td><code>max(max_charge_diff_fwd, max_charge_diff_rev) × avg_gradient_magnitude</code></td>\n<td>Contribution-score pruning (gene 13), percentile pruning, 3D color mode</td>\n</tr>\n<tr>\n<td><strong>significant_charge_change_forward</strong></td>\n<td>Sticky flag: has forward charge ever exceeded gene 7</td>\n<td>Set to <code>true</code> when <code>max_charge_diff_forward &gt; threshold</code>, never cleared (until explicit reset)</td>\n<td>Conway death protection only (shouldDieGenetic)</td>\n</tr>\n<tr>\n<td><strong>significant_charge_change_reverse</strong></td>\n<td>Sticky flag: has reverse charge ever exceeded gene 7</td>\n<td>Set to <code>true</code> when <code>max_charge_diff_reverse &gt; threshold</code>, never cleared</td>\n<td>Conway death protection only (shouldDieGenetic)</td>\n</tr>\n</tbody>\n</table>\n<p>The implementation also keeps <strong>significant_gradient_change</strong> — a sticky flag set when <strong>avg_gradient_magnitude</strong> crosses the gradient threshold (gene 10), Conway death protection only, parallel to the charge stickies.</p>\n<p><strong>Key design principle:</strong> All rolling metrics (<code>max_charge_diff_*</code>, <code>avg_gradient_magnitude</code>, <code>contributionScore</code>) are <em>live</em> — they reflect recent training and are used for pruning decisions. The <em>sticky</em> flags (<code>significant_charge_change_*</code>, <code>significant_gradient_change</code>) are only used to protect cells from Conway-style genetic death, ensuring that cells that have ever contributed are not killed by overcrowding/isolation rules.</p>\n<p><strong>Pruning uses rolling windows, not single-sample snapshots.</strong> The rolling window for <code>max_charge_diff_*</code> and <code>avg_gradient_magnitude</code> is sized to the training set (1 epoch worth of samples). A cell must be consistently inactive or non-learning across many images before it can be pruned.</p>\n<hr />\n<h3 id=\"how-genes-proteins-and-cell-memory-interact\">How Genes, Proteins, and Cell Memory Interact</h3>\n<p>The three information layers create a two-timescale system:</p>\n<table>\n<thead>\n<tr>\n<th>Timescale</th>\n<th>What Changes</th>\n<th>Mechanism</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Per-sample</strong> (fast)</td>\n<td>Proteins: charge, error, weights, bias, gradient</td>\n<td>Forward/backward pass, gradient descent</td>\n</tr>\n<tr>\n<td><strong>Per-sample</strong> (fast)</td>\n<td>Cell memory: rolling charge diffs, gradient history, contribution score</td>\n<td>Updated inside <code>updateCharge()</code> and <code>updateGradientImportance()</code></td>\n</tr>\n<tr>\n<td><strong>Per-generation</strong> (slow)</td>\n<td>Genes 0–13</td>\n<td>Crossover, mutation, natural selection</td>\n</tr>\n</tbody>\n</table>\n<ul>\n<li>Gene 4 determines <em>how many</em> weights a cell has → Proteins (weights) fill that array and are trained</li>\n<li>Gene 7 determines the <em>threshold</em> for significant activity → Cell memory (charge diffs) is measured against it</li>\n<li>Gene 8 determines <em>how fast</em> weights decay → Protein (weights) shrink by that factor each update</li>\n<li>Gene 9 determines <em>how fast</em> the cell learns → Protein (weights) update at that rate</li>\n<li>Gene 10 determines the <em>gradient survival threshold</em> → Cell memory (avg_gradient_magnitude) is compared against it</li>\n<li>Gene 11 determines the <em>response curve</em> → Protein (charge) passes through that activation function</li>\n<li>Gene 12 determines <em>weight-magnitude pruning sensitivity</em> → Protein (max |weight|) is compared against it</li>\n<li>Gene 13 determines <em>contribution-score pruning sensitivity</em> → Cell memory (contributionScore) is compared against it</li>\n<li>Genes 0–2 determine <em>who lives and dies</em> → The population of cells is shaped by these rules</li>\n</ul>\n<hr />\n<h2 id=\"cell-autonomy\">Cell Autonomy</h2>\n<p>The <code>U</code> key toggles <code>autonomous_network_genes</code>:</p>\n<ul>\n<li><strong>Off (default):</strong> All cells share the same network gene values from global config. Pruning decisions for charge delta, gradient threshold, weight prune threshold, and min contribution score read from <strong>config</strong> at decision time — so changing values via <strong>E</strong> or <strong>C</strong> takes effect immediately on all cells without rewriting each cell's gene snapshot. This is like training a traditional network — uniform architecture and hyperparameters.</li>\n<li><strong>On:</strong> Each cell has its own random gene values, subject to evolution. Pruning reads from the per-cell gene values. This is the bio-inspired mode — cells evolve independently, producing a heterogeneous network.</li>\n</ul>\n<table>\n<thead>\n<tr>\n<th>Gene</th>\n<th>Autonomous Off</th>\n<th>Autonomous On</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>0–2 (breeding)</td>\n<td>Always per-cell</td>\n<td>Always per-cell</td>\n</tr>\n<tr>\n<td>3 (mutation rate)</td>\n<td>Same for all cells</td>\n<td>Random per cell (0–99)</td>\n</tr>\n<tr>\n<td>4 (dendrite size)</td>\n<td>Same for all cells</td>\n<td>Random: 9, 25, or 49</td>\n</tr>\n<tr>\n<td>5 (bias range)</td>\n<td>Same for all cells</td>\n<td>0.001 or 0.01</td>\n</tr>\n<tr>\n<td>6 (fan-in)</td>\n<td>Same for all cells</td>\n<td>Measured per cell</td>\n</tr>\n<tr>\n<td>7 (charge delta)</td>\n<td>Config value used for pruning</td>\n<td>Per-cell: log-uniform 1e-6 to 1e-2</td>\n</tr>\n<tr>\n<td>8 (weight decay)</td>\n<td>Same for all cells</td>\n<td>Log-uniform 1e-6 to 1e-4</td>\n</tr>\n<tr>\n<td>9 (learning rate)</td>\n<td>Same for all cells</td>\n<td>Uniform 0.003–0.05</td>\n</tr>\n<tr>\n<td>10 (gradient threshold)</td>\n<td>Config value used for pruning</td>\n<td>Log-uniform 1e-8 to 1e-4</td>\n</tr>\n<tr>\n<td>11 (activation slope)</td>\n<td>Same for all cells</td>\n<td>Uniform 0.01–0.3</td>\n</tr>\n<tr>\n<td>12 (weight prune threshold)</td>\n<td>Config value used for pruning</td>\n<td>Log-uniform 1e-3 to 1e-1</td>\n</tr>\n<tr>\n<td>13 (min contribution score)</td>\n<td>Config value used for pruning</td>\n<td>Log-uniform 1e-6 to 1e-2</td>\n</tr>\n</tbody>\n</table>\n<hr />\n<h2 id=\"conways-game-of-life-vs-this-version\">Conway's Game of Life vs This Version</h2>\n<p><strong>Original Conway's rules (fixed for all cells):</strong>\n- Overcrowding (OT=3): &gt;3 neighbors → die.\n- Isolation (IT=2): &lt;2 neighbors → die.\n- Birth (BT=3): exactly 3 neighbors → new cell.\n- No genes, no mutation, no evolution. Rules are static.</p>\n<p><strong>This version makes OT, IT, BT into per-cell GENES that are inherited:</strong>\n- Gene 0 (OT): neighbors ≤ OT to survive (dies if more)\n- Gene 1 (IT): neighbors ≥ IT to survive (dies if fewer)\n- Gene 2 (BT): neighbors == BT for birth\n- Survival band: IT ≤ neighbors ≤ OT (OT &gt; IT enforced)</p>\n<p>Offspring inherit genes via crossover from two parents + mutation. This creates evolving populations with diverse survival strategies.</p>\n<hr />\n<h2 id=\"pruning-five-complementary-strategies\">Pruning: Five Complementary Strategies</h2>\n<p>Pruning removes cells that don't contribute, mimicking synaptic pruning during brain development. The simulator implements five strategies that can be combined:</p>\n<h3 id=\"strategy-1-activity-based-pruning-p-key\">Strategy 1: Activity-Based Pruning (P key)</h3>\n<p>Cells whose charge doesn't change significantly across training samples are killed. Uses cell memory (<code>max_charge_diff_forward</code>, <code>max_charge_diff_reverse</code>) compared against gene 7 (Charge Delta) or config value.</p>\n<ul>\n<li><strong>AND logic (<code>=</code> key):</strong> Cell must show significant change in <em>both</em> forward and reverse passes to survive. Strict — requires bidirectional contribution.</li>\n<li><strong>OR logic (<code>=</code> key):</strong> Cell survives if it shows significant change in <em>either</em> direction. More lenient.</li>\n</ul>\n<h3 id=\"strategy-2-gradient-based-pruning-o-key\">Strategy 2: Gradient-Based Pruning (O key)</h3>\n<p>Cells with average gradient magnitude below their survival threshold are killed. Uses cell memory (<code>avg_gradient_magnitude</code>) compared against gene 10 (Gradient Threshold) or config value.</p>\n<h3 id=\"strategy-3-weight-magnitude-pruning-active-when-p-is-on\">Strategy 3: Weight-Magnitude Pruning (active when P is on)</h3>\n<p>Cells whose maximum absolute weight falls below their weight prune threshold are killed. Uses protein data (max |weight|) compared against gene 12 (Weight Prune Threshold) or config value. Biologically: a synapse that has decayed to near zero carries no signal.</p>\n<h3 id=\"strategy-4-contribution-score-pruning-active-when-p-is-on\">Strategy 4: Contribution-Score Pruning (active when P is on)</h3>\n<p>Cells whose contribution score (<code>max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude</code>) falls below their minimum contribution score are killed. Uses cell memory (<code>contributionScore</code>) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines \"is this cell active?\" with \"is it learning?\" into a single survival test.</p>\n<h3 id=\"strategy-5-percentile-pruning-automatic-at-epoch-boundary\">Strategy 5: Percentile Pruning (automatic at epoch boundary)</h3>\n<p>At the end of each epoch, the bottom N% of cells (ranked by contribution score) are killed. Configured via <code>prune_percentile</code> (0 = off, set via <strong>C</strong> key). Unlike strategies 1–4 which use per-cell thresholds, this is a relative/competitive mechanism: cells must outperform their peers to survive.</p>\n<h3 id=\"pruning-summary-table\">Pruning Summary Table</h3>\n<table>\n<thead>\n<tr>\n<th>Strategy</th>\n<th>Trigger</th>\n<th>What's Compared</th>\n<th>Threshold Source</th>\n<th>When Checked</th>\n<th>Biological Analogy</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Activity (P)</td>\n<td>P key on</td>\n<td><code>max_charge_diff_*</code></td>\n<td>Gene 7 / config</td>\n<td>Every evolution step</td>\n<td>Activity-dependent survival</td>\n</tr>\n<tr>\n<td>Gradient (O)</td>\n<td>O key on</td>\n<td><code>avg_gradient_magnitude</code></td>\n<td>Gene 10 / config</td>\n<td>Every evolution step</td>\n<td>Neurotrophic factor requirement</td>\n</tr>\n<tr>\n<td>Weight-magnitude</td>\n<td>P key on</td>\n<td><code>max(\\|weight\\|)</code></td>\n<td>Gene 12 / config</td>\n<td>Every evolution step</td>\n<td>Synaptic maintenance threshold</td>\n</tr>\n<tr>\n<td>Contribution score</td>\n<td>P key on</td>\n<td><code>contributionScore</code></td>\n<td>Gene 13 / config</td>\n<td>Every evolution step</td>\n<td>Combined activity + learning</td>\n</tr>\n<tr>\n<td>Percentile</td>\n<td>End of epoch</td>\n<td>Rank of <code>contributionScore</code></td>\n<td>Config <code>prune_percentile</code></td>\n<td>Once per epoch boundary</td>\n<td>Competitive survival pressure</td>\n</tr>\n</tbody>\n</table>\n<p><strong>Note:</strong> \"Every evolution step\" means pruning conditions are checked continuously. However, the metrics being checked (<code>max_charge_diff</code>, <code>avg_gradient_magnitude</code>) are rolling averages over an epoch-worth of samples, so a cell must be consistently inactive over many samples to fail.</p>\n<hr />\n<h2 id=\"the-life-cycle-of-a-network\">The Life Cycle of a Network</h2>\n<h3 id=\"phase-1-growth-andromida-mode\">Phase 1: Growth (Andromida Mode)</h3>\n<p>Starting from a sparse grid, cells reproduce according to their birth genes. A cell is born at an empty location if its parent-derived gene 2 matches the local neighbor count. Offspring inherit all 14 genes from two parents via crossover, with germline mutation controlled by gene 3 (probability = MR/1000).</p>\n<h3 id=\"phase-2-learning-training-mode\">Phase 2: Learning (Training Mode)</h3>\n<p>Input layer cells are loaded with MNIST pixel data. Charge propagates forward through dendritic weights. Error propagates backward through reversed weight indices. Each cell updates its own weights and bias using its own learning rate (gene 9).</p>\n<h3 id=\"phase-3-pruning-environmental-selection\">Phase 3: Pruning (Environmental Selection)</h3>\n<p>Cells that don't contribute to the network are removed through five mechanisms (see Pruning section above). In autonomous mode, each cell's tolerance for pruning pressure is encoded in its genes (7, 10, 12, 13) — evolution discovers which sensitivity levels lead to useful networks.</p>\n<h3 id=\"phase-4-regrowth\">Phase 4: Regrowth</h3>\n<p>After pruning, evolution can restart. New cells fill gaps, potentially with mutated genes that produce different dendrite sizes, learning rates, activation slopes, or pruning sensitivities. Somatic mutation (gene 3, probability = MR/100,000) can also rarely re-randomize an existing cell's genes. The cycle repeats: <strong>grow → learn → prune → regrow</strong>.</p>\n<hr />\n<h2 id=\"the-grid\">The Grid</h2>\n<pre><code>         Layer 0       Layer 1       Layer 2      ...   Layer N-2     Layer N-1\n        (Input)       (Hidden)      (Hidden)           (Output)      (Desired)\n       ┌────────┐    ┌────────┐    ┌────────┐         ┌────────┐    ┌────────┐\n       │ 28×28  │    │ 28×28  │    │ 28×28  │         │ 28×28  │    │ 28×28  │\n       │ pixels │───&gt;│ cells  │───&gt;│ cells  │───&gt;...─&gt;│ cells  │    │ labels │\n       │(MNIST) │    │        │    │        │         │        │    │        │\n       └────────┘    └────────┘    └────────┘         └────────┘    └────────┘\n                     ◄──── charge flows forward (F key) ────►\n                     ◄──── error flows backward (B key) ────►\n</code></pre>\n<p>Layer 0 is loaded with MNIST pixel data. Layer N-1 holds desired output labels.\nLayers 1 through N-2 are the hidden layers where cells live, learn, and die.</p>\n<hr />\n<h2 id=\"how-the-forward-pass-works-one-cells-perspective\">How the Forward Pass Works (one cell's perspective)</h2>\n<p>Each cell looks at the layer <strong>above</strong> it (closer to input), gathers charges from\nnearby cells within its dendrite reach, and computes its own charge.</p>\n<pre><code>    LAYER ABOVE (layer - 1)                    THIS CELL (layer)\n    ┌─────────────────────────┐\n    │  .  .  .  .  .  .  .   │\n    │  .  .  .  .  .  .  .   │\n    │  .  . [A] [B] [C] .  . │                ┌───────────┐\n    │  .  . [D] [E] [F] .  . │ ──charges──&gt;   │  Cell X    │\n    │  .  . [G] [H] [I] .  . │                │  at (x,y)  │\n    │  .  .  .  .  .  .  .   │                └───────────┘\n    │  .  .  .  .  .  .  .   │\n    └─────────────────────────┘\n          3×3 dendrite reach\n          (gene 4 = 9 weights)\n</code></pre>\n<p><strong>Step 1: Gather upstream cells.</strong> Cell X checks every position within its <code>reach</code>\n(determined by gene 4) in the layer above. With gene 4 = 9, reach = 1, so it\nchecks a 3×3 area centered on its own (x,y) position. It collects the charges\nfrom cells A through I (skipping any empty positions).</p>\n<p><strong>Step 2: Compute weighted sum + bias.</strong></p>\n<pre><code>    charge = bias + (A.charge × w[0]) + (B.charge × w[1]) + (C.charge × w[2])\n                  + (D.charge × w[3]) + (E.charge × w[4]) + (F.charge × w[5])\n                  + (G.charge × w[6]) + (H.charge × w[7]) + (I.charge × w[8])\n</code></pre>\n<p>The bias is the cell's resting potential — a baseline signal present even with\nno input. It is learned via gradient descent, just like the weights.</p>\n<p><strong>Step 3: Apply leaky ReLU activation.</strong></p>\n<pre><code>    if charge &gt; 0:  charge = charge           (pass through)\n    if charge ≤ 0:  charge = slope × charge   (gene 11 controls slope)\n</code></pre>\n<p>Low slope (0.01) = selective neuron, suppresses negative signals.\nHigh slope (0.3) = permissive neuron, passes more signal through.</p>\n<p><strong>Step 4: Clip to [-10, 10] and store as the cell's new charge.</strong></p>\n<p><strong>Step 5: Update cell memory.</strong> The new charge is pushed to the cell's charge history array. Rolling <code>max_charge_diff</code> is recomputed (max − min of recent charges). <code>contributionScore</code> is recomputed as <code>max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude</code>.</p>\n<hr />\n<h3 id=\"weight-indexing\">Weight Indexing</h3>\n<p>Weights are stored in a flat 1D array. The 2D offset (dx, dy) from the cell\nto each upstream neighbor maps to an array index:</p>\n<pre><code>    weight_index = (dx + reach) × matrix_width + (dy + reach)\n\n    For a 3×3 dendrite (reach=1, matrix_width=3):\n\n    Upstream position:    (-1,-1) (-1, 0) (-1,+1)      Weight index:  0  1  2\n                          ( 0,-1) ( 0, 0) ( 0,+1)  →                  3  4  5\n                          (+1,-1) (+1, 0) (+1,+1)                      6  7  8\n</code></pre>\n<p>For a 5×5 dendrite (gene 4 = 25, reach = 2), the same formula produces\nindices 0–24 over a 5×5 grid of upstream positions.</p>\n<hr />\n<h2 id=\"how-the-backward-pass-works-one-cells-perspective\">How the Backward Pass Works (one cell's perspective)</h2>\n<p>Backpropagation has two jobs: (1) compute this cell's error signal, and\n(2) update this cell's weights. It works from the output layer back toward\nthe input layer.</p>\n<h3 id=\"job-1-compute-error-signal\">Job 1: Compute Error Signal</h3>\n<p><strong>Output layer cells</strong> (layer N-2): error = how wrong we are.</p>\n<pre><code>    error = (my_charge − desired_output) × leaky_ReLU_derivative(my_charge)\n</code></pre>\n<p><strong>Hidden layer cells</strong>: error = share of blame from cells below.</p>\n<pre><code>    THIS CELL (layer)                          LAYER BELOW (layer + 1)\n    ┌───────────┐                              ┌─────────────────────────┐\n    │  Cell X    │                              │  .  .  .  .  .  .  .   │\n    │  error = ? │ &lt;──errors + weights────      │  .  . [1] [2] [3] .  . │\n    └───────────┘                               │  .  . [4] [5] [6] .  . │\n                                                │  .  . [7] [8] [9] .  . │\n                                                │  .  .  .  .  .  .  .   │\n                                                └─────────────────────────┘\n                                                 These cells BELOW have\n                                                 already computed their\n                                                 errors (we work backward)\n</code></pre>\n<p>Cell X accumulates error from each cell below that connects to it:</p>\n<pre><code>    error = Σ (cell_below.error × cell_below.weights[reversed_index])\n            × leaky_ReLU_derivative(my_charge)\n</code></pre>\n<h3 id=\"why-reversed_index\">Why <code>reversed_index</code>?</h3>\n<p>In the forward pass, Cell 5 (below) uses Cell X's charge via <code>weight_index</code> to compute Cell 5's charge. In the backward pass, we need the reverse: Cell X needs Cell 5's error via the <strong>same connection</strong>, but looked up from Cell 5's weight array in the opposite direction:</p>\n<pre><code>    reversed_index = len(cell_below.weights) − 1 − weight_index\n\n    Forward (Cell 5 looks UP at Cell X):         Backward (Cell X looks DOWN at Cell 5):\n    weight_index = (dx + reach) × m + (dy + reach)\n                                                  reversed_index = len(w) - 1 - weight_index\n\n    For 3×3:  forward index 0 ↔ reversed index 8     (-1,-1) ↔ (+1,+1)\n              forward index 1 ↔ reversed index 7     (-1, 0) ↔ (+1, 0)\n              forward index 4 ↔ reversed index 4     ( 0, 0) ↔ ( 0, 0)  (center stays)\n              forward index 8 ↔ reversed index 0     (+1,+1) ↔ (-1,-1)\n\n    This maps (dx, dy) → (−dx, −dy), which is equivalent to transposing\n    the weight matrix — exactly what standard backprop does.\n</code></pre>\n<h3 id=\"job-2-update-weights\">Job 2: Update Weights</h3>\n<p>Once Cell X knows its error, it updates each of its own dendritic weights\nusing the upstream cell charges (same cells used in the forward pass):</p>\n<pre><code>    For each upstream cell in the layer above:\n        gradient = my_error × upstream_cell.charge\n        gradient = clip(gradient, −clip_range, +clip_range)\n\n        weight[index] −= learning_rate × gradient + weight_decay × weight[index]\n                         ╰──────── learn ────────╯   ╰──── regularize ────────╯\n\n    bias −= learning_rate × my_error\n</code></pre>\n<p>In autonomous mode, <code>learning_rate</code> comes from gene 9 and <code>weight_decay</code>\nfrom gene 8 — each cell runs its own gradient descent at its own speed.</p>\n<h3 id=\"job-3-update-cell-memory\">Job 3: Update Cell Memory</h3>\n<p>After weight updates, <code>updateGradientImportance()</code> pushes |gradient| to the rolling history, recomputes <code>avg_gradient_magnitude</code>, and recomputes <code>contributionScore</code>.</p>\n<hr />\n<h3 id=\"complete-forward-backward-example\">Complete Forward + Backward Example</h3>\n<pre><code>    Layer 0 (Input)    Layer 1 (Hidden)    Layer 2 (Output)    Layer 3 (Desired)\n    ┌──────────┐       ┌──────────┐        ┌──────────┐        ┌──────────┐\n    │          │       │          │        │          │        │          │\n    │  MNIST   │──F──&gt; │  Cells   │──F───&gt; │  Cells   │        │  Labels  │\n    │  pixels  │       │  learn   │        │  predict │        │  (0-9)   │\n    │          │       │          │ &lt;─B─── │          │ &lt;─B─── │          │\n    └──────────┘       └──────────┘        └──────────┘        └──────────┘\n\n    F = forward pass: charge flows left to right, layer by layer\n    B = backward pass: error flows right to left, layer by layer\n\n    1. Load MNIST image into Layer 0 (pixel values become cell charges)\n    2. Load one-hot label into Layer 3 (desired output)\n    3. FORWARD: Layer 1 cells compute charges from Layer 0\n                Layer 2 cells compute charges from Layer 1\n    4. BACKWARD: Layer 2 error = (Layer 2 charge − Layer 3 desired)\n                 Layer 2 updates its weights using Layer 1 charges\n                 Layer 1 error = accumulated from Layer 2 errors\n                 Layer 1 updates its weights using Layer 0 charges\n    5. Cell memory updated: charge diffs, gradient history, contribution scores\n    6. Repeat for next training sample\n</code></pre>\n<hr />\n<h2 id=\"3d-visualization-color-modes\">3D Visualization Color Modes</h2>\n<p>Press <strong>G</strong> in 3D view to cycle through five color modes:</p>\n<table>\n<thead>\n<tr>\n<th>Mode</th>\n<th>What It Shows</th>\n<th>Color Mapping</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Charge</strong></td>\n<td>Cell activation level</td>\n<td>Dark (low) → Bright (high charge)</td>\n</tr>\n<tr>\n<td><strong>Error</strong></td>\n<td>Backprop error signal</td>\n<td>Blue (negative) → Dark (zero) → Red (positive)</td>\n</tr>\n<tr>\n<td><strong>Gradient</strong></td>\n<td>Learning signal strength</td>\n<td>Dark (low |gradient|) → Green (high |gradient|)</td>\n</tr>\n<tr>\n<td><strong>Weight Strength</strong></td>\n<td>Average absolute weight</td>\n<td>Dark (near-zero weights) → Yellow (strong weights)</td>\n</tr>\n<tr>\n<td><strong>Contribution</strong></td>\n<td>Combined activity × learning score</td>\n<td>Dark (low) → Cyan (medium) → White (high contribution)</td>\n</tr>\n</tbody>\n</table>\n<p>Key <strong>4</strong> activates the backprop learning view: switches to 3D, sets color mode to <strong>Error</strong> so you see the full network update in real time as each training sample is processed. Press <strong>G</strong> to cycle to other modes while in this view.</p>\n<hr />\n<h2 id=\"v-key-statistics-views\">V Key: Statistics Views</h2>\n<p>Press <strong>V</strong> to cycle through three statistics screens:</p>\n<h3 id=\"screen-0-current-settings-pruning-readiness\">Screen 0: Current Settings + Pruning Readiness</h3>\n<p>Shows all current config values alongside network-measured suggestions (<code>← net: X</code>). Includes:\n- Key learning parameters (LR, bias range, weight decay, etc.)\n- Pruning thresholds with <code>[gene 12]</code> and <code>[gene 13]</code> labels\n- Network measurements (cells, avg fan-in, median gradient/weight/charge/error)\n- <strong>Pruning Readiness:</strong> \"Would die\" counts for each pruning strategy at current settings\n- Contribution score percentile distribution (p10, p25, p50, p75, p90, max)</p>\n<h3 id=\"screen-1-per-layer-averages\">Screen 1: Per-Layer Averages</h3>\n<p>Detailed per-layer statistics: average charge, error, gradient, weight, fan-in, silent neuron count, weight utilization.</p>\n<h3 id=\"screen-2-cell-types\">Screen 2: Cell Types</h3>\n<p>Cell type census and per-digit accuracy breakdown.</p>\n<p>All screens include footnotes explaining when metrics are measured (snapshot vs rolling average) and how pruning differs from display metrics.</p>\n<hr />\n<h2 id=\"training-features\">Training Features</h2>\n<table>\n<thead>\n<tr>\n<th>Feature</th>\n<th>Details</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Full neural-network training</strong></td>\n<td>Forward pass, backpropagation, weight/bias updates, cross-entropy loss</td>\n</tr>\n<tr>\n<td><strong>14 heritable genes</strong></td>\n<td>All 14 genes (breeding, network, learning, pruning) with autonomous/non-autonomous modes</td>\n</tr>\n<tr>\n<td><strong>5 pruning strategies</strong></td>\n<td>Activity, gradient, weight-magnitude, contribution-score, and percentile — all configurable via <strong>C</strong> key</td>\n</tr>\n<tr>\n<td><strong>Epoch-based training loop</strong></td>\n<td>One epoch = one full pass over all loaded samples; epochs are counted and displayed in the status bar</td>\n</tr>\n<tr>\n<td><strong>Minibatch gradient accumulation</strong></td>\n<td>Configurable batch size <strong>K</strong> (key <strong>K</strong>); gradients accumulate over K samples before one weight update</td>\n</tr>\n<tr>\n<td><strong>Epoch shuffling</strong></td>\n<td>Training samples are Fisher-Yates shuffled at the start of each epoch</td>\n</tr>\n<tr>\n<td><strong>Dual loss plots</strong></td>\n<td>Separate scrolling plots for per-minibatch loss (blue) and per-epoch loss (green), each with an independent Y-axis scale slider (0.1–20)</td>\n</tr>\n<tr>\n<td><strong>He initialization</strong></td>\n<td>Weight reset (<strong>X</strong> key) measures average effective fan-in and scales as <code>randn × √(2/fan_in)</code></td>\n</tr>\n<tr>\n<td><strong>Smart defaults with suggestions</strong></td>\n<td><code>suggestParams()</code> scans the network and suggests LR, bias range, weight decay, pruning thresholds. Shown in <strong>E</strong>, <strong>I</strong>, <strong>C</strong> dialogs and <strong>V</strong> screen</td>\n</tr>\n<tr>\n<td><strong>Save / Load</strong></td>\n<td><strong>S</strong> exports full network state as JSON; <strong>L</strong> imports it; auto-downloads a snapshot when accuracy hits 100%</td>\n</tr>\n<tr>\n<td><strong>Save filename convention</strong></td>\n<td>Prefix = accuracy tier letter (P = perfect, A–J = tiers, N = none, X = unknown) + dataset letter (M/F/S/U/X)</td>\n</tr>\n</tbody>\n</table>\n<hr />\n<h2 id=\"typical-workflow\">Typical Workflow</h2>\n<ol>\n<li>Open <code>neurosim_web.html</code> (browser) or the GitHub Pages link</li>\n<li>Load a saved network (<strong>L</strong>) or draw cells manually (click/drag on the grid)</li>\n<li>Load training data (<strong>M</strong>) — choose <strong>D</strong> for demo, <strong>J</strong> for your own MNIST JSON</li>\n<li>Set forward direction (<strong>F</strong>), enable backprop (<strong>B</strong>), start training (<strong>T</strong>)</li>\n<li>Check <strong>V</strong> screen for pruning readiness before enabling pruning</li>\n<li>Toggle pruning (<strong>P</strong> for activity/weight/contribution, <strong>O</strong> for gradient) to remove dead cells</li>\n<li>Use <strong>C</strong> to tune pruning thresholds (suggestions shown from network analysis)</li>\n<li>Disable display (<strong>D</strong>) for faster training — plots and status bar keep updating</li>\n<li>Watch accuracy climb — save good networks (<strong>S</strong>)</li>\n</ol>\n<hr />\n<h2 id=\"keyboard-controls\">Keyboard Controls</h2>\n<table>\n<thead>\n<tr>\n<th>Key</th>\n<th>Action</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><strong>Space</strong></td>\n<td>Toggle running mode (enables evolution loop: Andromida birth/death + pruning)</td>\n</tr>\n<tr>\n<td><strong>A</strong></td>\n<td>Toggle Andromida mode (genetic birth/death using cell genes)</td>\n</tr>\n<tr>\n<td><strong>T</strong></td>\n<td>Toggle training mode (forward pass + optional backprop)</td>\n</tr>\n<tr>\n<td><strong>B</strong></td>\n<td>Toggle backpropagation (error signal + weight updates)</td>\n</tr>\n<tr>\n<td><strong>F / R</strong></td>\n<td>Forward / Reverse charge flow direction</td>\n</tr>\n<tr>\n<td><strong>P</strong></td>\n<td>Toggle activity-based pruning (kills cells with low charge change, low weight magnitude, low contribution score)</td>\n</tr>\n<tr>\n<td><strong>O</strong></td>\n<td>Toggle gradient-based pruning (kills cells with low gradient)</td>\n</tr>\n<tr>\n<td><strong>=</strong></td>\n<td>Toggle prune logic between AND/OR (for charge-based pruning)</td>\n</tr>\n<tr>\n<td><strong>C</strong></td>\n<td>Change pruning parameters: charge delta, gradient threshold, min contribution score, prune percentile</td>\n</tr>\n<tr>\n<td><strong>U</strong></td>\n<td>Toggle autonomous cell genes (per-cell vs global parameters)</td>\n</tr>\n<tr>\n<td><strong>M</strong></td>\n<td>Load training data — <strong>J</strong> (file), <strong>D</strong> then <strong>M</strong> or <strong>F</strong> (hosted MNIST / Fashion demo JSON), or <strong>M</strong> (synthetic)</td>\n</tr>\n<tr>\n<td><strong>K</strong></td>\n<td>Set gradient minibatch size (accumulate gradients over K samples)</td>\n</tr>\n<tr>\n<td><strong>G</strong></td>\n<td>2D: switch genes/proteins display. 3D: cycle color mode (Charge → Error → Gradient → Weight Strength → Contribution)</td>\n</tr>\n<tr>\n<td><strong>V</strong></td>\n<td>Cycle statistics views (Settings + Pruning Readiness / Averages / Cell Types)</td>\n</tr>\n<tr>\n<td><strong>E</strong></td>\n<td>Edit all parameters interactively (with network-measured suggestions)</td>\n</tr>\n<tr>\n<td><strong>I</strong></td>\n<td>Change learning rate (with suggestion based on fan-in)</td>\n</tr>\n<tr>\n<td><strong>X</strong></td>\n<td>Reset network weights/biases (He initialization, auto-computes scaling)</td>\n</tr>\n<tr>\n<td><strong>N</strong></td>\n<td>Nuke all hidden layer cells</td>\n</tr>\n<tr>\n<td><strong>S / L</strong></td>\n<td>Save / Load network state (JSON)</td>\n</tr>\n<tr>\n<td><strong>W</strong></td>\n<td>Reset gradient tracking for all cells</td>\n</tr>\n<tr>\n<td><strong>D</strong></td>\n<td>Toggle display updating (training + plots always run; only expensive cell rendering is toggled)</td>\n</tr>\n<tr>\n<td><strong>3</strong></td>\n<td>Toggle 3D Three.js view</td>\n</tr>\n<tr>\n<td><strong>4</strong></td>\n<td>Toggle 3D backprop visualization (full network, Error color mode by default)</td>\n</tr>\n<tr>\n<td><strong>Q</strong></td>\n<td>Dump per-layer telemetry report to stats pane</td>\n</tr>\n<tr>\n<td><strong>H</strong></td>\n<td>Jump to next <strong>##</strong> heading in the README help panel (2D only)</td>\n</tr>\n<tr>\n<td><strong>?</strong></td>\n<td>Scroll help panel to top</td>\n</tr>\n<tr>\n<td><strong>Mouse</strong></td>\n<td>Left-click: place/remove cells. Right-click/Ctrl+click: inspect cell. Drag: paint cells</td>\n</tr>\n</tbody>\n</table>\n<hr />\n<h2 id=\"files-and-build\">Files and Build</h2>\n<table>\n<thead>\n<tr>\n<th>File</th>\n<th>Role</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code>README.md</code></td>\n<td><strong>Canonical manual</strong> — rendered as the in-app help preview (Markdown → HTML at build time)</td>\n</tr>\n<tr>\n<td><code>neurosim_web.js</code></td>\n<td>All simulation, training, visualization, and UI logic</td>\n</tr>\n<tr>\n<td><code>build_neurosim_web.py</code></td>\n<td>Reads <code>README.md</code> + <code>neurosim_web.js</code>, writes <code>neurosim_web.html</code> (requires <code>pip install markdown</code>)</td>\n</tr>\n<tr>\n<td><code>get_help_defs.py</code></td>\n<td>Legacy duplicate of early help strings; <strong>not</strong> used by the build — kept for reference only</td>\n</tr>\n<tr>\n<td><code>mnist_to_neurosim_web_json.py</code></td>\n<td>Downloads MNIST/Fashion-MNIST and writes compact JSON training files</td>\n</tr>\n<tr>\n<td><code>mnist_demo_500.json</code></td>\n<td>Bundled MNIST demo (500 samples); <strong>M</strong> → <strong>D</strong> → <strong>M</strong></td>\n</tr>\n<tr>\n<td><code>fashion-mnist_demo_500.json</code></td>\n<td>Bundled Fashion-MNIST demo (500 samples); <strong>M</strong> → <strong>D</strong> → <strong>F</strong></td>\n</tr>\n<tr>\n<td><code>neurosim_web.html</code></td>\n<td>Built output — single-file app (HTML + CSS + JS inline)</td>\n</tr>\n<tr>\n<td><code>neurosim_python/</code></td>\n<td>Legacy Python/pygame desktop version (see its own README)</td>\n</tr>\n</tbody>\n</table>\n<h3 id=\"building-the-standalone-html\">Building the standalone HTML</h3>\n<pre><code class=\"language-bash\">python3 -m pip install markdown   # once — converts README.md for the help panel\npython3 build_neurosim_web.py\n</code></pre>\n<p>Re-run after editing <code>README.md</code>, <code>neurosim_web.js</code>, or styles inside <code>build_neurosim_web.py</code>.</p>\n<h3 id=\"running-locally\">Running locally</h3>\n<p><strong>Option A — direct open:</strong> Double-click <code>neurosim_web.html</code>. Works for most features, but Chromium may block some <code>file://</code> loads.</p>\n<p><strong>Option B — local HTTP server (recommended):</strong></p>\n<pre><code class=\"language-bash\">python3 -m http.server 8765\n# then open http://localhost:8765/neurosim_web.html\n</code></pre>\n<p>This avoids all <code>file://</code> security restrictions and enables the <strong>M</strong> → <strong>D</strong> demo-fetch path.</p>\n<hr />\n<h2 id=\"loading-mnist-training-data\">Loading MNIST Training Data</h2>\n<p><strong>Quick demo (500 samples):</strong> Press <strong>M</strong> → <strong>D</strong> → OK, then choose <strong>M</strong> for <code>mnist_demo_500.json</code> or <strong>F</strong> for <code>fashion-mnist_demo_500.json</code> (both ship in the repo for GitHub Pages).</p>\n<p><strong>Full dataset (up to 5000+ samples):</strong> Generate a local file with the conversion script:</p>\n<pre><code class=\"language-bash\">python3 mnist_to_neurosim_web_json.py --dataset mnist --count 5000 -o mnist_training_web.json\n# Fashion-MNIST: --dataset fashion\n# SSL issues: add --no-verify-ssl\n# Custom slice: --offset 1000 --count 2000\n</code></pre>\n<p>Then press <strong>M</strong> → <strong>J</strong> → select the file.</p>\n<p>The compact format (default) stores only charge values and labels — ~22 MB for 5000 samples vs ~1.9 GB verbose. Use <code>--verbose-cells</code> for the old format if needed.</p>\n<hr />\n<h2 id=\"troubleshooting\">Troubleshooting</h2>\n<p><strong><code>file://</code> security errors:</strong> Chromium may log <em>\"Unsafe attempt to load URL … 'file:' URLs are treated as unique security origins\"</em>. Each <code>file://</code> path is treated as its own origin, so subframe loads and fetch calls can fail. <strong>Fix:</strong> serve the repo over HTTP (<code>python3 -m http.server 8765</code>) and open via <code>http://localhost:8765/neurosim_web.html</code>.</p>\n<p><strong>Large JSON files crashing the browser:</strong> If you generated verbose-format JSON for thousands of samples, the file can be 1+ GB. Use the compact format (default) or reduce <code>--count</code>.</p>\n<p><strong>Loading a network during training:</strong> Safe — the epoch counter resets automatically so training resumes cleanly from epoch 0.</p>\n<hr />\n<h2 id=\"results\">Results</h2>\n<ul>\n<li><strong>MNIST digits:</strong> 100/100 correct on 6-layer network with 25 weights/cell</li>\n<li><strong>Fashion-MNIST:</strong> 98/100 on similar architecture</li>\n<li>Networks survive save/reload and can continue training or evolution</li>\n</ul>\n<hr />\n<h2 id=\"author\">Author</h2>\n<p>Jonathan Marc Rothberg</p>\n<h2 id=\"license\">License</h2>\n<p>MIT</p>";
 </script>
 <script>
 /**
- * Browser port of neurosim/ (pygame + OpenGL) — expects global THREE and HELP_SCREEN.
+ * Browser port of neurosim/ (pygame + OpenGL) — expects global THREE and README_HTML (from build_neurosim_web.py).
  * JSON save/load; synthetic training; optional training JSON import.
  */
 (function () {
@@ -98,8 +126,8 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
   const HEIGHT = (WINDOW_HEIGHT / CELL_SIZE / 4) | 0;
   const ARRAY_LAYERS = 16;
   /* Y-axis max defaults; sliders let user zoom in/out on the loss scale. */
-  const PLOT_YMAX_MIN = 1;
-  const PLOT_YMAX_MAX = 200;
+  const PLOT_YMAX_MIN = 0.1;
+  const PLOT_YMAX_MAX = 20;
   const FASHION_LABELS = '0 T-shirt/top | 1 Trouser | 2 Pullover | 3 Dress | 4 Coat | 5 Sandal | 6 Shirt | 7 Sneaker | 8 Bag | 9 Ankle boot';
   const WEIGHT_DRAW_THRESHOLD = 0.01;
   const EPS = 1e-8;
@@ -151,6 +179,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     '',
     '3) Load training batches — key M (not in 3D view):',
     '   • Dialog 1: type J then OK = load real MNIST/Fashion JSON.',
+    '   •          type D then OK = fetch demo: pick M (MNIST) or F (Fashion), 500 samples each.',
     '   •          type M then OK = quick fake data (no file).',
     '   • Dialog 2–3: batch size and start index (for J, count must be ≤ samples in file).',
     '   • Then your browser opens a file picker — choose e.g. mnist_training_web.json',
@@ -161,7 +190,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     '   Key K — gradient minibatch size (1=SGD per image; larger=average grad over K images then one update; typical MNIST 16–64).',
     '   Plot strip: sliders = X history length before scroll (green=epoch mean, blue=gradient-minibatch mean).',
     '',
-    '5) Full help: all sections are below (scroll). Key H jumps to each section in order.',
+    '5) Full manual: README.md is rendered below (tables, diagrams). Key H jumps between each ## section.',
     '',
     '6) If keys do nothing: click the canvas again. If 3D (key 3) is on, M/H/V etc.',
     '   only work after you press 3 again to return to 2D.',
@@ -347,8 +376,10 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       minibatchLossPoints: [], epochLossPoints: [], epochs: 1, batch_size: 1,
       _batch_loss_sum: 0, _batch_sample_count: 0,
       _mini_loss_sum: 0, _mini_n: 0,
-      plotEpochYmax: 50, plotMinibatchYmax: 50,
+      plotEpochYmax: 10, plotMinibatchYmax: 10,
       training_data_layer_0: [], training_data_num_layer_minus_1: [],
+      /* M=MNIST F=Fashion S=synthetic U=unknown file X=no training data loaded — used in save filenames */
+      training_dataset_code: 'X',
       rotation_x: 0, rotation_y: 0, rotation_angle: 0, zoom: -15,
       mouse_up: true, current_index: 0, side_panel_text: [], training_stats_buffer: {},
       stats_update_frequency: 1, timing: false,
@@ -683,6 +714,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     }
     updateCharge(nc, dir) {
       const cfg = CellConfig, hm = cfg ? cfg.how_much_training_data : 20;
+      const cdThresh = (cfg && cfg.autonomous_network_genes) ? this.genes[7] : (cfg ? cfg.charge_delta : this.genes[7]);
       if (dir === 'forward') {
         this.forward_charges.push(nc);
         if (this.forward_charges.length > hm) this.forward_charges.shift();
@@ -691,7 +723,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
           const v = this.forward_charges[i]; if (v < mn) mn = v; if (v > mx) mx = v;
         }
         this.max_charge_diff_forward = mx - mn;
-        if (this.max_charge_diff_forward > this.genes[7]) this.significant_charge_change_forward = true;
+        if (this.max_charge_diff_forward > cdThresh) this.significant_charge_change_forward = true;
       } else if (dir === 'reverse') {
         this.reverse_charges.push(nc);
         if (this.reverse_charges.length > hm) this.reverse_charges.shift();
@@ -700,7 +732,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
           const v = this.reverse_charges[i]; if (v < mn) mn = v; if (v > mx) mx = v;
         }
         this.max_charge_diff_reverse = mx - mn;
-        if (this.max_charge_diff_reverse > this.genes[7]) this.significant_charge_change_reverse = true;
+        if (this.max_charge_diff_reverse > cdThresh) this.significant_charge_change_reverse = true;
       }
       this.charge = nc;
       this._recomputeContributionScore();
@@ -801,9 +833,11 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-7);
         if (this.avg_gradient_magnitude <= gt) return true;
       }
-      /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta */
+      /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta.
+         Non-autonomous: use config value (so E/C changes apply immediately).
+         Autonomous: use per-cell gene 7. */
       if (prune) {
-        const cd = this.genes[7];
+        const cd = (cfg && cfg.autonomous_network_genes) ? this.genes[7] : (cfg ? cfg.charge_delta : this.genes[7]);
         const fwd = this.max_charge_diff_forward > cd;
         const rev = this.max_charge_diff_reverse > cd;
         if (pl === 'AND' && !(fwd && rev)) return true;
@@ -988,6 +1022,10 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
   function trainOnSample(state, config, seqIndex, renderBackpropFn, minibatchPlotCtx) {
     /* seqIndex = position in epoch (0..setSize-1); dataIndex = actual sample after shuffle */
     const dataIndex = (state._shuffle_order && state._shuffle_order.length > seqIndex) ? state._shuffle_order[seqIndex] : seqIndex;
+    if (dataIndex < 0 || dataIndex >= state.training_data_layer_0.length) {
+      console.warn(`trainOnSample: dataIndex ${dataIndex} out of range (${state.training_data_layer_0.length} samples). Skipping.`);
+      return;
+    }
     applyLayerFromGrid(state.cells, 0, state.training_data_layer_0[dataIndex]);
     applyLayerFromGrid(state.cells, config.num_layers - 1, state.training_data_num_layer_minus_1[dataIndex]);
     state.total_weights = sumAbsWeights(state.cells, config.num_layers);
@@ -1069,13 +1107,14 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
   function updateCells(state, config) {
     const start = 1, stop = config.num_layers - 1;
     const cells = state.cells;
+    let gridTopoChanged = false;
     for (let z = start; z < stop; z++) {
       const neighOfs = buildNeighborOffsets(z, config.num_layers);
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
         if (cells[x][y][z]) {
           const cell = cells[x][y][z];
           if (cell.shouldDie(state.prune, state.gradient_prune, state.prune_logic)) {
-            cells[x][y][z] = null; state.invalidateNeighborCache(); continue;
+            cells[x][y][z] = null; gridTopoChanged = true; state.invalidateNeighborCache(); continue;
           }
         }
         if (cells[x][y][z]) {
@@ -1108,7 +1147,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             if (numAlive === newGenes[2]) {
               cells[x][y][z] = new Cell(z, x, y, config.number_of_weights, config.bias_range, config.avg_weights_cell,
                 config.charge_delta, config.weight_decay, config.mutation_rate, newGenes);
-              state.invalidateNeighborCache();
+              gridTopoChanged = true; state.invalidateNeighborCache();
               const nc = cells[x][y][z];
               if (Math.random() < nc.genes[3] / 1000) nc.initalizeBreedingGenes();
               if (Math.random() < nc.genes[3] / 1000)
@@ -1119,12 +1158,13 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
           if (cells[x][y][z]) {
             const cell = cells[x][y][z];
             if (cell.shouldDieGenetic(numAlive, state.charge_change_protection)) {
-              cells[x][y][z] = null; state.invalidateNeighborCache();
+              cells[x][y][z] = null; gridTopoChanged = true; state.invalidateNeighborCache();
             }
           }
         }
       }
     }
+    if (gridTopoChanged) state._3d_dirty = true;
   }
 
   /* Percentile pruning: rank all hidden cells by contributionScore, kill bottom N%.
@@ -1149,7 +1189,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       state.cells[s.x][s.y][s.z] = null;
       killed++;
     }
-    if (killed > 0) state.invalidateNeighborCache();
+    if (killed > 0) { state.invalidateNeighborCache(); state._3d_dirty = true; }
     return killed;
   }
 
@@ -1209,6 +1249,14 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       total += t.nan_count;
     }
     lines.push(total ? `\n*** TOTAL NaN ISSUES: ${total} ***` : '\nNo NaN issues detected.');
+    lines.push('');
+    lines.push('── Key ───────────────────────────────────');
+    lines.push('Active  = cells with at least one |w| > ε');
+    lines.push('Charge  = avg |charge| of active cells');
+    lines.push('Error   = avg |error| of active cells');
+    lines.push('Gradient= signed gradient (avg/max/min)');
+    lines.push('Weights = avg |weight| per active cell');
+    lines.push('NaN     = numeric overflow/corruption');
     return lines.join('\n');
   }
 
@@ -1350,15 +1398,29 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       }
     }
     const out = [];
-    out.push(`Network Statistics:`);
+    out.push(`═══ Network Averages ═══`);
     out.push(`Predictions: ${state.total_predictions} | Avg Loss: ${state.running_avg_loss.toExponential(4)}`);
-    out.push(`Active Cells: ${activeCells}/${tcells}\n\nLayer-wise:`);
+    out.push(`Active Cells: ${activeCells}/${tcells}`);
+    out.push('');
     for (let z = 1; z < nl - 1; z++) {
       out.push(`Layer ${z}:`);
-      out.push(`  Gradient: ${avgG[z].toExponential(4)}, Max: ${maxG[z].toExponential(4)}, Min: ${minG[z].toExponential(4)}`);
-      out.push(`  Error: ${avgE[z].toExponential(4)}  Charge: ${avgC[z].toFixed(4)}`);
-      out.push(`  Weights: ${avgW[z].toFixed(4)}  Avg/Cell: ${avgWpc[z].toFixed(2)}`);
+      out.push(`  Grad: avg=${avgG[z].toExponential(2)} max=${maxG[z].toExponential(2)} min=${minG[z].toExponential(2)}`);
+      out.push(`  |Error|: ${avgE[z].toExponential(2)}  |Charge|: ${avgC[z].toFixed(4)}`);
+      out.push(`  |Weight|: ${avgW[z].toFixed(4)}  Wts/Cell: ${avgWpc[z].toFixed(0)}`);
     }
+    out.push('');
+    out.push('── Key ───────────────────────────────────');
+    out.push('Grad     = raw gradient (signed, not abs)¹');
+    out.push('|Error|  = avg absolute error per active cell¹');
+    out.push('|Charge| = avg absolute charge per active cell¹');
+    out.push('|Weight| = avg absolute weight per active cell');
+    out.push('Wts/Cell = avg weight array size per cell');
+    out.push('Active   = cells with at least one |w| > ε');
+    out.push('');
+    out.push('¹ These are instantaneous per-cell values from');
+    out.push('  the last sample processed. Pruning uses');
+    out.push('  rolling epoch-window averages instead');
+    out.push('  (see V screen 0 for pruning readiness).');
     return out.join('\n');
   }
   /* Plot arrays now store raw loss values (not pre-baked pixel Y). Rendering maps loss→pixel using current ymax (slider). */
@@ -1490,29 +1552,70 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     s.push(`Accuracy: ${state.bingo_count}/${CellConfig.how_much_training_data} (Max: ${state.max_bingo_count})`);
     const lastEL = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(4) : '--';
     s.push(`Epoch Loss: ${lastEL}  |  Cells: ${b.totalCells} (${b.totalActive} active)`);
-    s.push(`Avg Fan-In: ${b.avgFanIn.toFixed(1)}  |  Dead Neurons: ${b.totalDeadNeurons}`);
-    s.push(`Weight Utilization: ${b.weightUtil.toFixed(1)}%  |  Avg |W|: ${b.avgWeightMag.toFixed(4)}`);
-    s.push(`Gradient Flow (L1/Llast): ${b.gradFlowRatio.toFixed(2)}`);
+    s.push(`Avg Fan-In: ${b.avgFanIn.toFixed(1)}  |  Silent¹: ${b.totalDeadNeurons}`);
+    s.push(`Weight Util: ${b.weightUtil.toFixed(1)}%  |  Avg|W|: ${b.avgWeightMag.toFixed(4)}`);
+    s.push(`Grad Flow (L1/Llast): ${b.gradFlowRatio.toFixed(2)}`);
     s.push('');
-    /* Per-digit accuracy */
+    /* Per-digit accuracy — epoch-level */
     const da = [];
     for (let d = 0; d < 10; d++) {
       const t = b.digitTotal[d], c = b.digitCorrect[d];
       da.push(`${d}:${c}/${t}`);
     }
-    s.push('Per-Digit: ' + da.join(' '));
+    s.push('Per-Digit (epoch): ' + da.join(' '));
     s.push('');
-    /* Per-layer table */
-    s.push('Layer | Cells | AvgFanIn | Dead | Grad(avg/max) | ChgDist(min/med/max) | W%  | Avg|W|');
-    s.push('──────┼───────┼──────────┼──────┼───────────────┼──────────────────────┼─────┼───────');
+    /* Table 1: Structure — narrow columns that fit ~50 chars */
+    s.push('── Structure ──────────────────────');
+    s.push('Lyr  Cells  FanIn  Slnt  W%   |W|');
+    s.push('───  ─────  ─────  ────  ───  ────');
     for (const L of b.layers) {
       s.push(
-        `  ${L.z}   |  ${String(L.nCells).padStart(4)} | ${L.avgFanIn.toFixed(1).padStart(8)} | ${String(L.deadCount).padStart(4)} ` +
-        `| ${L.avgGrad.toExponential(2)}/${L.maxGrad.toExponential(2)} ` +
-        `| ${L.chMin.toFixed(2)}/${L.chMed.toFixed(2)}/${L.chMax.toFixed(2)} ` +
-        `| ${L.weightUtil.toFixed(0).padStart(3)}% | ${L.avgWeightMag.toFixed(4)}`
+        ` ${String(L.z).padStart(2)}  ${String(L.nCells).padStart(5)}  ${L.avgFanIn.toFixed(1).padStart(5)}` +
+        `  ${String(L.deadCount).padStart(4)}  ${L.weightUtil.toFixed(0).padStart(3)}  ${L.avgWeightMag.toFixed(3)}`
       );
     }
+    s.push('');
+    /* Table 2: Dynamics — gradient and charge distribution */
+    s.push('── Dynamics ──────────────────────────────');
+    s.push('Lyr  Grad(avg)   Grad(max)   Chg(min/med/max)');
+    s.push('───  ─────────   ─────────   ────────────────');
+    for (const L of b.layers) {
+      s.push(
+        ` ${String(L.z).padStart(2)}  ${L.avgGrad.toExponential(1).padStart(9)}` +
+        `   ${L.maxGrad.toExponential(1).padStart(9)}` +
+        `   ${L.chMin.toFixed(2)}/${L.chMed.toFixed(2)}/${L.chMax.toFixed(2)}`
+      );
+    }
+    s.push('');
+    s.push('── Key ───────────────────────────────────');
+    s.push('FanIn    = avg connected upstream cells per neuron');
+    s.push('Silent   = neurons with |charge| < 0.001 (not firing)¹');
+    s.push('           NOTE: "silent" ≠ "pruned". Silent cells are');
+    s.push('           still alive. Pruning (V screen 0) uses');
+    s.push('           different thresholds (charge_diff, gradient).');
+    s.push('W%       = % of weight slots with |w| > 0.01');
+    s.push('|W|      = mean absolute weight across all slots');
+    s.push('Grad     = |gradient| from last sample in epoch²');
+    s.push('Chg      = charge distribution from last sample in epoch²');
+    s.push('GradFlow = max grad layer 1 / max grad last hidden');
+    s.push('Per-Digit= correct/total per digit class (full epoch)');
+    s.push('');
+    s.push('── When measured ─────────────────────────');
+    s.push('¹ Silent: charge snapshot at end of epoch (from');
+    s.push('  last sample). A cell may fire for other images');
+    s.push('  but read 0 on the last one — low count is normal.');
+    s.push('² Grad/Chg: snapshot from last sample in epoch.');
+    s.push('');
+    s.push('── How pruning differs from these stats ──');
+    s.push('Pruning does NOT use single-sample snapshots.');
+    s.push('Cell Memory accumulates rolling-window metrics:');
+    s.push(' • max_charge_diff = max−min charge over last');
+    s.push('   epoch-worth of samples (window = training set)');
+    s.push(' • avg_gradient_magnitude = mean |grad| over');
+    s.push('   last epoch-worth of samples');
+    s.push(' • contributionScore = charge_diff × avg_grad');
+    s.push('These rolling values are what pruning checks.');
+    s.push('See V screen 0 for pruning readiness details.');
     return s.join('\n');
   }
 
@@ -1570,7 +1673,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         const c = state.cells[x][y][z]; if (!c) continue;
         totalH++;
         csScores.push(c.contributionScore);
-        const cd = c.genes[7];
+        const cd = config.autonomous_network_genes ? c.genes[7] : config.charge_delta;
         const fwd = c.max_charge_diff_forward > cd;
         const rev = c.max_charge_diff_reverse > cd;
         if (state.prune_logic === 'AND' ? !(fwd && rev) : !(fwd || rev)) wouldDieCharge++;
@@ -1599,6 +1702,29 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
    p10=${pct(0.10).toExponential(2)}  p25=${pct(0.25).toExponential(2)}  p50=${pct(0.50).toExponential(2)}
    p75=${pct(0.75).toExponential(2)}  p90=${pct(0.90).toExponential(2)}  max=${pct(1.0).toExponential(2)}`;
     }
+    out += `\n\n── Key ───────────────────────────────────
+ ← net       = suggestion measured from live network
+ [gene 12/13]= threshold lives inside each cell
+ Fan-in      = avg connected upstream cells per neuron
+ Would die   = cells that fail this test RIGHT NOW¹
+ Contrib     = max(charge_diff) × avg|gradient|
+ Percentile  = bottom N% killed by rank each epoch²
+
+── How pruning metrics work ──────────────
+¹ "Would die" previews current cell memory.
+  Cell memory uses ROLLING WINDOWS (not single
+  samples):
+   • charge_diff = max−min charge over last N
+     samples (N = training set size = 1 epoch)
+   • avg_gradient = mean |gradient| over last
+     N samples
+   • contributionScore = charge_diff × avg_grad
+  P/O pruning checks these rolling values each
+  evolution step. Cells only die after they've
+  been consistently inactive across many samples.
+² Percentile pruning runs once at EPOCH BOUNDARY.
+  Ranks all cells by contributionScore and kills
+  the bottom N%. Set via C key.`;
     return out;
   }
 
@@ -1953,11 +2079,21 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     root.position.z = state.zoom * 0.4;
   }
 
+  function dispose3dBackpropChildren() {
+    const bg = g3.backpropGroup;
+    while (bg.children.length) {
+      const ch = bg.children[0];
+      bg.remove(ch);
+      if (ch.geometry) ch.geometry.dispose();
+      if (ch.material) ch.material.dispose();
+    }
+  }
+
   function render3dNetwork(state, config) {
     if (state._3d_dirty) rebuild3dCache(state, config);
     refresh3dColors(state, config);
     apply3dCamera(state);
-    while (g3.backpropGroup.children.length) g3.backpropGroup.remove(g3.backpropGroup.children[0]);
+    dispose3dBackpropChildren();
     g3.renderer.render(g3.scene, g3.camera);
     const hud = document.getElementById('hud3d');
     hud.style.display = 'block';
@@ -1973,7 +2109,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     if (state._3d_dirty) rebuild3dCache(state, config);
     refresh3dColors(state, config);
     apply3dCamera(state);
-    while (g3.backpropGroup.children.length) g3.backpropGroup.remove(g3.backpropGroup.children[0]);
+    dispose3dBackpropChildren();
     const nl = config.num_layers, halfW = WIDTH / 2, halfH = HEIGHT / 2;
     const z = cz * 2 - nl;
     const px = cx - halfW, py = cy - halfH;
@@ -2105,24 +2241,32 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       });
     }
 
-    const helpKeys = Object.keys(HELP_SCREEN);
-    const HELP_STATIC_BASE = QUICK_START + '\n\n' + helpKeys.map((k) => `── ${k} ──\n${HELP_SCREEN[k]}`).join('\n\n');
-    function scrollHelpToKey(key) {
-      if (!helpScroll) return;
-      const needle = `── ${key} ──`;
-      const pos = HELP_STATIC_BASE.indexOf(needle);
-      if (pos < 0) return;
-      const line = HELP_STATIC_BASE.slice(0, pos).split('\n').length - 1;
-      const lh = parseFloat(getComputedStyle(helpScroll).lineHeight);
-      const lineHeight = Number.isFinite(lh) && lh > 0 ? lh : 17;
-      helpScroll.scrollTop = Math.max(0, line * lineHeight - 8);
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    let helpPanelDomBuilt = false;
+    function ensureHelpPanelDom() {
+      if (helpPanelDomBuilt || !helpScroll) return;
+      helpPanelDomBuilt = true;
+      const body = (typeof README_HTML === 'string' && README_HTML.length)
+        ? README_HTML
+        : '<p><strong>README not embedded.</strong> Run <code>python3 build_neurosim_web.py</code> (needs <code>pip install markdown</code>).</p>';
+      helpScroll.innerHTML =
+        '<section class="quick-start"><h2 class="quick-h">Quick start (MNIST &amp; keys)</h2>' +
+        '<pre class="quick-pre">' + escapeHtml(QUICK_START) + '</pre></section>' +
+        '<article class="readme-body">' + body + '</article>' +
+        '<hr class="help-sep" /><h2 class="help-log-h">Session log</h2>' +
+        '<pre id="helpLog" class="help-log"></pre>';
     }
     function drawHelpPanel() {
       if (!helpScroll) return;
-      const prev = helpScroll.scrollTop;
-      const log = state.side_panel_text.slice(-40).join('\n');
-      helpScroll.textContent = HELP_STATIC_BASE + '\n\n── Log ──\n' + log;
-      helpScroll.scrollTop = prev;
+      ensureHelpPanelDom();
+      const logEl = document.getElementById('helpLog');
+      if (logEl) logEl.textContent = state.side_panel_text.slice(-40).join('\n');
     }
     (function initColSplitter() {
       if (!colSplitter || !document.getElementById('side')) return;
@@ -2208,21 +2352,52 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       if (!state.show_3d_view) doDraw2d();
       else state._3d_dirty = true;
     }
-    /** tag e.g. '' or '-perfect' — matches desktop save_file(..., tag) naming hint */
+    /** M=MNIST F=Fashion; first letter of other dataset names; U if missing. */
+    function trainingDatasetCodeFromRoot(obj) {
+      const d = obj && obj.dataset != null ? String(obj.dataset).toLowerCase().trim() : '';
+      if (d === 'mnist') return 'M';
+      if (d === 'fashion') return 'F';
+      if (d.length && /^[a-z]/i.test(d)) return d.charAt(0).toUpperCase();
+      return 'U';
+    }
+    /** One letter from best epoch correct/total: P=100%, A=90–99%, … J=10–19%, K=<10% nonzero, N=0, X=no samples. */
+    function saveFilenameAccuracyLetter(maxCorrect, total) {
+      if (total <= 0) return 'X';
+      if (maxCorrect >= total) return 'P';
+      const r = maxCorrect / total;
+      if (r >= 0.9) return 'A';
+      if (r >= 0.8) return 'B';
+      if (r >= 0.7) return 'C';
+      if (r >= 0.6) return 'D';
+      if (r >= 0.5) return 'E';
+      if (r >= 0.4) return 'F';
+      if (r >= 0.3) return 'G';
+      if (r >= 0.2) return 'H';
+      if (r >= 0.1) return 'I';
+      if (r > 0) return 'J';
+      return 'N';
+    }
+    /** tag e.g. '' or '-perfect' — filename starts with accuracy letter + dataset letter (e.g. PM = perfect MNIST). */
     function downloadSimulationJson(tag) {
-      const payload = { version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles };
+      const g = saveFilenameAccuracyLetter(state.max_bingo_count, config.how_much_training_data);
+      const d = /^[A-Z]$/i.test(state.training_dataset_code || '') ? String(state.training_dataset_code).toUpperCase() : 'X';
+      const payload = {
+        version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles,
+        training_dataset_code: d, max_bingo_count: state.max_bingo_count, bingo_count: state.bingo_count,
+      };
       const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       const ts = Date.now();
-      a.download = tag
-        ? `neurosim_${config.num_layers}_${config.number_of_weights}_${state.bingo_count}_${config.how_much_training_data}${tag}_${ts}.json`
-        : `neurosim_${ts}.json`;
+      const core = `${g}${d}_${config.num_layers}_${config.number_of_weights}_${state.bingo_count}_${config.how_much_training_data}`;
+      const fname = tag ? `neurosim_${core}${tag}_${ts}.json` : `neurosim_${core}_${ts}.json`;
+      a.download = fname;
       a.click();
       URL.revokeObjectURL(a.href);
+      return fname;
     }
-    function doRenderBackprop(layer, pos) {
-      const [x, y] = pos;
+    /* Must match backPropagation: renderBackpropFn(z, x, y) — not (layer, [x,y]). */
+    function doRenderBackprop(layer, x, y) {
       render3dBackprop(state, config, layer, x, y);
     }
 
@@ -2265,12 +2440,12 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         } else uiPrint('No cell at this location');
         return;
       }
-      if (e.button === 0) {
+        if (e.button === 0) {
         if (state.cells[cx][cy][layer] == null) {
           state.cells[cx][cy][layer] = new Cell(layer, cx, cy, config.number_of_weights, config.bias_range, config.avg_weights_cell,
             config.charge_delta, config.weight_decay, config.mutation_rate, null);
         } else state.cells[cx][cy][layer] = null;
-        state.mouse_up = false; state.invalidateNeighborCache();
+        state.mouse_up = false; state.invalidateNeighborCache(); state._3d_dirty = true;
         doDraw2d();
       }
     });
@@ -2281,7 +2456,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       if (state.cells[cx][cy][layer] == null) {
         state.cells[cx][cy][layer] = new Cell(layer, cx, cy, config.number_of_weights, config.bias_range, config.avg_weights_cell,
           config.charge_delta, config.weight_decay, config.mutation_rate, null);
-        state.invalidateNeighborCache();
+        state.invalidateNeighborCache(); state._3d_dirty = true;
         doDraw2d();
       }
     });
@@ -2299,8 +2474,12 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         return;
       }
       if (!state.show_3d_view && k.toLowerCase() === 'h') {
-        state.current_index = (state.current_index + 1) % helpKeys.length;
-        scrollHelpToKey(helpKeys[state.current_index]);
+        ensureHelpPanelDom();
+        /* Quick-start title first, then every ## in the README preview */
+        const heads = helpScroll ? helpScroll.querySelectorAll('.quick-start h2.quick-h, .readme-body h2') : [];
+        if (heads.length === 0) return;
+        state.current_index = (state.current_index + 1) % heads.length;
+        heads[state.current_index].scrollIntoView({ block: 'start', behavior: 'smooth' });
         return;
       }
       if (k === ' ') { state.running = !state.running; return; }
@@ -2366,7 +2545,15 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       }
       if (k === '4') {
         state.show_backprop_view = !state.show_backprop_view;
-        if (state.show_backprop_view) { state.show_3d_view = true; layout2d3d(); }
+        if (state.show_backprop_view) {
+          state.show_3d_view = true; layout2d3d();
+          /* Auto-switch to Error color mode so you see backprop activity across the full network */
+          state._3d_color_mode = 1;
+          uiPrint('Backprop view ON — color: Error (G to cycle). Full network updates each sample.');
+        } else {
+          state._3d_color_mode = 0;
+          uiPrint('Backprop view OFF — color: Charge');
+        }
         state._3d_dirty = true; return;
       }
       if (k.toLowerCase() === 't') {
@@ -2381,12 +2568,11 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         const ds = await showModal(
           'Load training data\n\n'
           + 'Type J + OK = choose a local .json file (from mnist_to_neurosim_web_json.py)\n'
-          + 'Type D + OK = fetch MNIST demo (500 samples) from same folder / GitHub\n'
+          + 'Type D + OK = fetch a 500-sample demo from same folder / GitHub (then pick MNIST vs Fashion)\n'
           + 'Type M + OK = synthetic random images (no file)\n\n'
           + 'Enter J, D, or M:',
           'J'
         );
-        if ((ds || '').toLowerCase() === 'f') uiPrint(FASHION_LABELS);
         const n = await showModal('How many samples per training cycle? (must be ≤ rows in JSON file, e.g. 500)', config.how_much_training_data);
         const st = await showModal('Start index into dataset (usually 0):', config.start_index);
         let ns = n != null && !Number.isNaN(+n) ? Math.max(1, (+n) | 0) : config.how_much_training_data;
@@ -2442,6 +2628,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
                     config.how_much_training_data = state.training_data_layer_0.length;
                     state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
                     state.training_data_loaded = true;
+                    state.training_dataset_code = trainingDatasetCodeFromRoot(obj);
                     state.reset_training_metrics();
                     state._training_sample_i = null;
                     showLoadedTrainingPreview();
@@ -2455,11 +2642,21 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
               fp.click();
             });
           } else if ((ds || '').toLowerCase() === 'd') {
-            /* Fetch demo MNIST JSON from server (works on GitHub Pages or local http server) */
-            uiPrint('Fetching mnist_demo_500.json …');
+            const demoPick = await showModal(
+              'Which hosted demo (500 samples each)?\n\n'
+              + 'M + OK = MNIST (mnist_demo_500.json)\n'
+              + 'F + OK = Fashion-MNIST (fashion-mnist_demo_500.json)\n\n'
+              + 'Enter M or F:',
+              'M'
+            );
+            const useFashion = (demoPick || 'm').toLowerCase().trim().startsWith('f');
+            const demoFile = useFashion ? 'fashion-mnist_demo_500.json' : 'mnist_demo_500.json';
+            if (useFashion) uiPrint(FASHION_LABELS);
+            /* Fetch demo JSON from server (works on GitHub Pages or local http server) */
+            uiPrint('Fetching ' + demoFile + ' …');
             try {
-              const resp = await fetch('mnist_demo_500.json');
-              if (!resp.ok) throw new Error(`HTTP ${resp.status} – is the file in the same folder?`);
+              const resp = await fetch(demoFile);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status} – is ${demoFile} in the same folder?`);
               const obj = JSON.parse(await resp.text());
               const ar = obj.samples != null ? obj.samples : (Array.isArray(obj) ? obj : null);
               if (!Array.isArray(ar) || !ar.length) throw new Error('No samples array in file');
@@ -2479,6 +2676,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
                 config.how_much_training_data = state.training_data_layer_0.length;
                 state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
                 state.training_data_loaded = true;
+                state.training_dataset_code = trainingDatasetCodeFromRoot(obj);
                 state.reset_training_metrics();
                 state._training_sample_i = null;
                 showLoadedTrainingPreview();
@@ -2494,6 +2692,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             }
             state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
             state.training_data_loaded = true;
+            state.training_dataset_code = 'S';
             state.reset_training_metrics();
             state._training_sample_i = null;
             showLoadedTrainingPreview();
@@ -2533,7 +2732,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
               if (c) c.remapWeights(config.length_of_dendrite);
             }
         }
-        state.invalidateNeighborCache();
+        state.invalidateNeighborCache(); state._3d_dirty = true;
         /* Auto-update avg_weights_cell when dendrite changes */
         if (config.number_of_weights !== oldNumWeights) {
           const mfi = computeAvgFanIn(state, config);
@@ -2562,7 +2761,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
               c.colorGenes(); c.initializeNetworkProteins(); c.colorProteins();
             }
           }
-        state.not_saved_yet = true; state.reset_training_metrics();
+        state.not_saved_yet = true; state._3d_dirty = true; state.reset_training_metrics();
         uiPrint(`Reset weights+bias. fan-in=${config.avg_weights_cell}, bias_range=${config.bias_range}, He scale=√(2/${config.avg_weights_cell})=${Math.sqrt(2/config.avg_weights_cell).toFixed(3)}`);
         return;
       }
@@ -2571,14 +2770,14 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         if ((ok || '').toLowerCase() === 'y') {
           for (let z = 1; z < config.num_layers - 1; z++)
             for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) state.cells[x][y][z] = null;
-          state.invalidateNeighborCache(); state.reset_training_metrics();
+          state.invalidateNeighborCache(); state._3d_dirty = true; state.reset_training_metrics();
         }
         return;
       }
       if (k.toLowerCase() === 's') {
-        downloadSimulationJson('');
+        const fn = downloadSimulationJson('');
         state.not_saved_yet = false;
-        uiPrint('Saved JSON (download started)');
+        uiPrint('Saved ' + fn + '  (1st letter=epoch max correct tier P..N, 2nd=M/F/S/U/X dataset)');
         return;
       }
       if (k.toLowerCase() === 'l' && !state.show_3d_view) {
@@ -2595,7 +2794,16 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
                 Cell.setConfig(config);
                 state.cells = deserializeCells(obj.cells, config);
                 state.training_cycles = obj.training_cycles || 0;
-                state.invalidateNeighborCache();
+                if (obj.training_dataset_code != null && String(obj.training_dataset_code).length === 1)
+                  state.training_dataset_code = String(obj.training_dataset_code).toUpperCase();
+                if (obj.max_bingo_count != null) state.max_bingo_count = +obj.max_bingo_count;
+                /* Reset mid-epoch training state so the next tick starts a fresh epoch.
+                   Without this, _training_sample_i can point past the data array (crash),
+                   and bingo_count from the saved file gets double-counted into the current epoch. */
+                state._training_sample_i = null;
+                state._shuffle_order = null;
+                state.bingo_count = 0;
+                state.invalidateNeighborCache(); state._3d_dirty = true;
                 uiPrint('Loaded JSON state');
               } catch (err) { uiPrint('Load error: ' + err); }
               res();
@@ -2630,17 +2838,23 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       requestAnimationFrame(tick);
       /* neurosim/main.py: autosave when a full training batch is ever classified perfectly */
       if (state.max_bingo_count === config.how_much_training_data && state.not_saved_yet) {
-        downloadSimulationJson('-perfect');
+        const fn = downloadSimulationJson('-perfect');
         state.not_saved_yet = false;
-        uiPrint('Perfect batch: auto-saved JSON (tag -perfect).');
+        uiPrint('Perfect epoch: auto-saved ' + fn);
       }
       if (state.running) updateCells(state, config);
       if (state.training_mode) {
+        /* Guard: if data was reloaded or network loaded, clamp setSize to actual data length */
+        const actualDataLen = state.training_data_layer_0.length;
+        if (config.how_much_training_data > actualDataLen && actualDataLen > 0) {
+          config.how_much_training_data = actualDataLen;
+        }
         const setSize = config.how_much_training_data;
-        const renderBp = state.show_3d_view && state.show_backprop_view && state.display_updating ? doRenderBackprop : null;
         try {
           /* Always one sample per rAF — keeps browser responsive. D key only toggles cell drawing, not training pace or graphs. */
           if (state._training_sample_i == null) state._training_sample_i = 0;
+          /* If sample counter somehow exceeds data, reset to start of next epoch */
+          if (state._training_sample_i >= setSize) state._training_sample_i = 0;
           if (state._training_sample_i === 0) {
             state.bingo_count = 0;
             state._batch_loss_sum = 0;
@@ -2654,11 +2868,8 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             }
           }
           const i = state._training_sample_i;
-          trainOnSample(state, config, i, renderBp, pred);
-          if (state.display_updating) {
-            if (!state.show_3d_view) doDraw2d();
-            else state._3d_dirty = true;
-          }
+          trainOnSample(state, config, i, null, pred);
+          if (state.display_updating && !state.show_3d_view) doDraw2d();
           state._training_sample_i++;
           if (state._training_sample_i >= setSize) {
             const ba = state._batch_loss_sum / Math.max(1, state._batch_sample_count);
@@ -2667,7 +2878,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             /* Epoch-boundary percentile pruning (competitive / trophic factor) */
             if (config.prune_percentile > 0 && (state.prune || state.gradient_prune)) {
               const killed = percentilePrune(state, config);
-              if (killed > 0) { uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`); state._3d_dirty = true; }
+              if (killed > 0) uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`);
             }
             if (state.show_training_stats && state.training_cycles % state.stats_update_frequency === 0) {
               updateTrainingStats(state, config);
@@ -2675,11 +2886,10 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             }
           }
         } catch (err) { console.error(err); uiPrint('Training error: ' + err); }
-        state._3d_dirty = true;
       }
       if (state.display_updating) {
         if (state.show_3d_view) {
-          if (!state.show_backprop_view) render3dNetwork(state, config);
+          render3dNetwork(state, config);
         } else {
           doDraw2d();
         }
@@ -2700,7 +2910,9 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         `Dir=${state.direction_of_charge_flow} BackP=${state.back_prop} Disp=${state.display_updating} | ` +
         `Epoch=${state.training_cycles}${epochProgress} Samples=${config.how_much_training_data} K=${K} | ` +
         `EpochLoss=${lastEpochLoss} BatchLoss=${lastMinibatchLoss} | Correct=${state.bingo_count}/${config.how_much_training_data} Max=${state.max_bingo_count}`;
-      if (!state.training_mode && !state.show_3d_view) {
+      /* When training stops, keep the last loss graphs visible (don't blank them).
+         Only clear plots when there is no training data at all. */
+      if (!state.training_mode && !state.training_data_loaded && !state.show_3d_view) {
         pred.fillRect(0, 0, pred.canvas.width, pred.canvas.height);
         if (predBatch) predBatch.fillRect(0, 0, predBatch.canvas.width, predBatch.canvas.height);
       }

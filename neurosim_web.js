@@ -1,5 +1,5 @@
 /**
- * Browser port of neurosim/ (pygame + OpenGL) — expects global THREE and HELP_SCREEN.
+ * Browser port of neurosim/ (pygame + OpenGL) — expects global THREE and README_HTML (from build_neurosim_web.py).
  * JSON save/load; synthetic training; optional training JSON import.
  */
 (function () {
@@ -13,8 +13,8 @@
   const HEIGHT = (WINDOW_HEIGHT / CELL_SIZE / 4) | 0;
   const ARRAY_LAYERS = 16;
   /* Y-axis max defaults; sliders let user zoom in/out on the loss scale. */
-  const PLOT_YMAX_MIN = 1;
-  const PLOT_YMAX_MAX = 200;
+  const PLOT_YMAX_MIN = 0.1;
+  const PLOT_YMAX_MAX = 20;
   const FASHION_LABELS = '0 T-shirt/top | 1 Trouser | 2 Pullover | 3 Dress | 4 Coat | 5 Sandal | 6 Shirt | 7 Sneaker | 8 Bag | 9 Ankle boot';
   const WEIGHT_DRAW_THRESHOLD = 0.01;
   const EPS = 1e-8;
@@ -66,6 +66,7 @@
     '',
     '3) Load training batches — key M (not in 3D view):',
     '   • Dialog 1: type J then OK = load real MNIST/Fashion JSON.',
+    '   •          type D then OK = fetch demo: pick M (MNIST) or F (Fashion), 500 samples each.',
     '   •          type M then OK = quick fake data (no file).',
     '   • Dialog 2–3: batch size and start index (for J, count must be ≤ samples in file).',
     '   • Then your browser opens a file picker — choose e.g. mnist_training_web.json',
@@ -76,7 +77,7 @@
     '   Key K — gradient minibatch size (1=SGD per image; larger=average grad over K images then one update; typical MNIST 16–64).',
     '   Plot strip: sliders = X history length before scroll (green=epoch mean, blue=gradient-minibatch mean).',
     '',
-    '5) Full help: all sections are below (scroll). Key H jumps to each section in order.',
+    '5) Full manual: README.md is rendered below (tables, diagrams). Key H jumps between each ## section.',
     '',
     '6) If keys do nothing: click the canvas again. If 3D (key 3) is on, M/H/V etc.',
     '   only work after you press 3 again to return to 2D.',
@@ -262,8 +263,10 @@
       minibatchLossPoints: [], epochLossPoints: [], epochs: 1, batch_size: 1,
       _batch_loss_sum: 0, _batch_sample_count: 0,
       _mini_loss_sum: 0, _mini_n: 0,
-      plotEpochYmax: 50, plotMinibatchYmax: 50,
+      plotEpochYmax: 10, plotMinibatchYmax: 10,
       training_data_layer_0: [], training_data_num_layer_minus_1: [],
+      /* M=MNIST F=Fashion S=synthetic U=unknown file X=no training data loaded — used in save filenames */
+      training_dataset_code: 'X',
       rotation_x: 0, rotation_y: 0, rotation_angle: 0, zoom: -15,
       mouse_up: true, current_index: 0, side_panel_text: [], training_stats_buffer: {},
       stats_update_frequency: 1, timing: false,
@@ -598,6 +601,7 @@
     }
     updateCharge(nc, dir) {
       const cfg = CellConfig, hm = cfg ? cfg.how_much_training_data : 20;
+      const cdThresh = (cfg && cfg.autonomous_network_genes) ? this.genes[7] : (cfg ? cfg.charge_delta : this.genes[7]);
       if (dir === 'forward') {
         this.forward_charges.push(nc);
         if (this.forward_charges.length > hm) this.forward_charges.shift();
@@ -606,7 +610,7 @@
           const v = this.forward_charges[i]; if (v < mn) mn = v; if (v > mx) mx = v;
         }
         this.max_charge_diff_forward = mx - mn;
-        if (this.max_charge_diff_forward > this.genes[7]) this.significant_charge_change_forward = true;
+        if (this.max_charge_diff_forward > cdThresh) this.significant_charge_change_forward = true;
       } else if (dir === 'reverse') {
         this.reverse_charges.push(nc);
         if (this.reverse_charges.length > hm) this.reverse_charges.shift();
@@ -615,7 +619,7 @@
           const v = this.reverse_charges[i]; if (v < mn) mn = v; if (v > mx) mx = v;
         }
         this.max_charge_diff_reverse = mx - mn;
-        if (this.max_charge_diff_reverse > this.genes[7]) this.significant_charge_change_reverse = true;
+        if (this.max_charge_diff_reverse > cdThresh) this.significant_charge_change_reverse = true;
       }
       this.charge = nc;
       this._recomputeContributionScore();
@@ -716,9 +720,11 @@
         const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-7);
         if (this.avg_gradient_magnitude <= gt) return true;
       }
-      /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta */
+      /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta.
+         Non-autonomous: use config value (so E/C changes apply immediately).
+         Autonomous: use per-cell gene 7. */
       if (prune) {
-        const cd = this.genes[7];
+        const cd = (cfg && cfg.autonomous_network_genes) ? this.genes[7] : (cfg ? cfg.charge_delta : this.genes[7]);
         const fwd = this.max_charge_diff_forward > cd;
         const rev = this.max_charge_diff_reverse > cd;
         if (pl === 'AND' && !(fwd && rev)) return true;
@@ -903,6 +909,10 @@
   function trainOnSample(state, config, seqIndex, renderBackpropFn, minibatchPlotCtx) {
     /* seqIndex = position in epoch (0..setSize-1); dataIndex = actual sample after shuffle */
     const dataIndex = (state._shuffle_order && state._shuffle_order.length > seqIndex) ? state._shuffle_order[seqIndex] : seqIndex;
+    if (dataIndex < 0 || dataIndex >= state.training_data_layer_0.length) {
+      console.warn(`trainOnSample: dataIndex ${dataIndex} out of range (${state.training_data_layer_0.length} samples). Skipping.`);
+      return;
+    }
     applyLayerFromGrid(state.cells, 0, state.training_data_layer_0[dataIndex]);
     applyLayerFromGrid(state.cells, config.num_layers - 1, state.training_data_num_layer_minus_1[dataIndex]);
     state.total_weights = sumAbsWeights(state.cells, config.num_layers);
@@ -984,13 +994,14 @@
   function updateCells(state, config) {
     const start = 1, stop = config.num_layers - 1;
     const cells = state.cells;
+    let gridTopoChanged = false;
     for (let z = start; z < stop; z++) {
       const neighOfs = buildNeighborOffsets(z, config.num_layers);
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
         if (cells[x][y][z]) {
           const cell = cells[x][y][z];
           if (cell.shouldDie(state.prune, state.gradient_prune, state.prune_logic)) {
-            cells[x][y][z] = null; state.invalidateNeighborCache(); continue;
+            cells[x][y][z] = null; gridTopoChanged = true; state.invalidateNeighborCache(); continue;
           }
         }
         if (cells[x][y][z]) {
@@ -1023,7 +1034,7 @@
             if (numAlive === newGenes[2]) {
               cells[x][y][z] = new Cell(z, x, y, config.number_of_weights, config.bias_range, config.avg_weights_cell,
                 config.charge_delta, config.weight_decay, config.mutation_rate, newGenes);
-              state.invalidateNeighborCache();
+              gridTopoChanged = true; state.invalidateNeighborCache();
               const nc = cells[x][y][z];
               if (Math.random() < nc.genes[3] / 1000) nc.initalizeBreedingGenes();
               if (Math.random() < nc.genes[3] / 1000)
@@ -1034,12 +1045,13 @@
           if (cells[x][y][z]) {
             const cell = cells[x][y][z];
             if (cell.shouldDieGenetic(numAlive, state.charge_change_protection)) {
-              cells[x][y][z] = null; state.invalidateNeighborCache();
+              cells[x][y][z] = null; gridTopoChanged = true; state.invalidateNeighborCache();
             }
           }
         }
       }
     }
+    if (gridTopoChanged) state._3d_dirty = true;
   }
 
   /* Percentile pruning: rank all hidden cells by contributionScore, kill bottom N%.
@@ -1064,7 +1076,7 @@
       state.cells[s.x][s.y][s.z] = null;
       killed++;
     }
-    if (killed > 0) state.invalidateNeighborCache();
+    if (killed > 0) { state.invalidateNeighborCache(); state._3d_dirty = true; }
     return killed;
   }
 
@@ -1124,6 +1136,14 @@
       total += t.nan_count;
     }
     lines.push(total ? `\n*** TOTAL NaN ISSUES: ${total} ***` : '\nNo NaN issues detected.');
+    lines.push('');
+    lines.push('── Key ───────────────────────────────────');
+    lines.push('Active  = cells with at least one |w| > ε');
+    lines.push('Charge  = avg |charge| of active cells');
+    lines.push('Error   = avg |error| of active cells');
+    lines.push('Gradient= signed gradient (avg/max/min)');
+    lines.push('Weights = avg |weight| per active cell');
+    lines.push('NaN     = numeric overflow/corruption');
     return lines.join('\n');
   }
 
@@ -1265,15 +1285,29 @@
       }
     }
     const out = [];
-    out.push(`Network Statistics:`);
+    out.push(`═══ Network Averages ═══`);
     out.push(`Predictions: ${state.total_predictions} | Avg Loss: ${state.running_avg_loss.toExponential(4)}`);
-    out.push(`Active Cells: ${activeCells}/${tcells}\n\nLayer-wise:`);
+    out.push(`Active Cells: ${activeCells}/${tcells}`);
+    out.push('');
     for (let z = 1; z < nl - 1; z++) {
       out.push(`Layer ${z}:`);
-      out.push(`  Gradient: ${avgG[z].toExponential(4)}, Max: ${maxG[z].toExponential(4)}, Min: ${minG[z].toExponential(4)}`);
-      out.push(`  Error: ${avgE[z].toExponential(4)}  Charge: ${avgC[z].toFixed(4)}`);
-      out.push(`  Weights: ${avgW[z].toFixed(4)}  Avg/Cell: ${avgWpc[z].toFixed(2)}`);
+      out.push(`  Grad: avg=${avgG[z].toExponential(2)} max=${maxG[z].toExponential(2)} min=${minG[z].toExponential(2)}`);
+      out.push(`  |Error|: ${avgE[z].toExponential(2)}  |Charge|: ${avgC[z].toFixed(4)}`);
+      out.push(`  |Weight|: ${avgW[z].toFixed(4)}  Wts/Cell: ${avgWpc[z].toFixed(0)}`);
     }
+    out.push('');
+    out.push('── Key ───────────────────────────────────');
+    out.push('Grad     = raw gradient (signed, not abs)¹');
+    out.push('|Error|  = avg absolute error per active cell¹');
+    out.push('|Charge| = avg absolute charge per active cell¹');
+    out.push('|Weight| = avg absolute weight per active cell');
+    out.push('Wts/Cell = avg weight array size per cell');
+    out.push('Active   = cells with at least one |w| > ε');
+    out.push('');
+    out.push('¹ These are instantaneous per-cell values from');
+    out.push('  the last sample processed. Pruning uses');
+    out.push('  rolling epoch-window averages instead');
+    out.push('  (see V screen 0 for pruning readiness).');
     return out.join('\n');
   }
   /* Plot arrays now store raw loss values (not pre-baked pixel Y). Rendering maps loss→pixel using current ymax (slider). */
@@ -1405,29 +1439,70 @@
     s.push(`Accuracy: ${state.bingo_count}/${CellConfig.how_much_training_data} (Max: ${state.max_bingo_count})`);
     const lastEL = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(4) : '--';
     s.push(`Epoch Loss: ${lastEL}  |  Cells: ${b.totalCells} (${b.totalActive} active)`);
-    s.push(`Avg Fan-In: ${b.avgFanIn.toFixed(1)}  |  Dead Neurons: ${b.totalDeadNeurons}`);
-    s.push(`Weight Utilization: ${b.weightUtil.toFixed(1)}%  |  Avg |W|: ${b.avgWeightMag.toFixed(4)}`);
-    s.push(`Gradient Flow (L1/Llast): ${b.gradFlowRatio.toFixed(2)}`);
+    s.push(`Avg Fan-In: ${b.avgFanIn.toFixed(1)}  |  Silent¹: ${b.totalDeadNeurons}`);
+    s.push(`Weight Util: ${b.weightUtil.toFixed(1)}%  |  Avg|W|: ${b.avgWeightMag.toFixed(4)}`);
+    s.push(`Grad Flow (L1/Llast): ${b.gradFlowRatio.toFixed(2)}`);
     s.push('');
-    /* Per-digit accuracy */
+    /* Per-digit accuracy — epoch-level */
     const da = [];
     for (let d = 0; d < 10; d++) {
       const t = b.digitTotal[d], c = b.digitCorrect[d];
       da.push(`${d}:${c}/${t}`);
     }
-    s.push('Per-Digit: ' + da.join(' '));
+    s.push('Per-Digit (epoch): ' + da.join(' '));
     s.push('');
-    /* Per-layer table */
-    s.push('Layer | Cells | AvgFanIn | Dead | Grad(avg/max) | ChgDist(min/med/max) | W%  | Avg|W|');
-    s.push('──────┼───────┼──────────┼──────┼───────────────┼──────────────────────┼─────┼───────');
+    /* Table 1: Structure — narrow columns that fit ~50 chars */
+    s.push('── Structure ──────────────────────');
+    s.push('Lyr  Cells  FanIn  Slnt  W%   |W|');
+    s.push('───  ─────  ─────  ────  ───  ────');
     for (const L of b.layers) {
       s.push(
-        `  ${L.z}   |  ${String(L.nCells).padStart(4)} | ${L.avgFanIn.toFixed(1).padStart(8)} | ${String(L.deadCount).padStart(4)} ` +
-        `| ${L.avgGrad.toExponential(2)}/${L.maxGrad.toExponential(2)} ` +
-        `| ${L.chMin.toFixed(2)}/${L.chMed.toFixed(2)}/${L.chMax.toFixed(2)} ` +
-        `| ${L.weightUtil.toFixed(0).padStart(3)}% | ${L.avgWeightMag.toFixed(4)}`
+        ` ${String(L.z).padStart(2)}  ${String(L.nCells).padStart(5)}  ${L.avgFanIn.toFixed(1).padStart(5)}` +
+        `  ${String(L.deadCount).padStart(4)}  ${L.weightUtil.toFixed(0).padStart(3)}  ${L.avgWeightMag.toFixed(3)}`
       );
     }
+    s.push('');
+    /* Table 2: Dynamics — gradient and charge distribution */
+    s.push('── Dynamics ──────────────────────────────');
+    s.push('Lyr  Grad(avg)   Grad(max)   Chg(min/med/max)');
+    s.push('───  ─────────   ─────────   ────────────────');
+    for (const L of b.layers) {
+      s.push(
+        ` ${String(L.z).padStart(2)}  ${L.avgGrad.toExponential(1).padStart(9)}` +
+        `   ${L.maxGrad.toExponential(1).padStart(9)}` +
+        `   ${L.chMin.toFixed(2)}/${L.chMed.toFixed(2)}/${L.chMax.toFixed(2)}`
+      );
+    }
+    s.push('');
+    s.push('── Key ───────────────────────────────────');
+    s.push('FanIn    = avg connected upstream cells per neuron');
+    s.push('Silent   = neurons with |charge| < 0.001 (not firing)¹');
+    s.push('           NOTE: "silent" ≠ "pruned". Silent cells are');
+    s.push('           still alive. Pruning (V screen 0) uses');
+    s.push('           different thresholds (charge_diff, gradient).');
+    s.push('W%       = % of weight slots with |w| > 0.01');
+    s.push('|W|      = mean absolute weight across all slots');
+    s.push('Grad     = |gradient| from last sample in epoch²');
+    s.push('Chg      = charge distribution from last sample in epoch²');
+    s.push('GradFlow = max grad layer 1 / max grad last hidden');
+    s.push('Per-Digit= correct/total per digit class (full epoch)');
+    s.push('');
+    s.push('── When measured ─────────────────────────');
+    s.push('¹ Silent: charge snapshot at end of epoch (from');
+    s.push('  last sample). A cell may fire for other images');
+    s.push('  but read 0 on the last one — low count is normal.');
+    s.push('² Grad/Chg: snapshot from last sample in epoch.');
+    s.push('');
+    s.push('── How pruning differs from these stats ──');
+    s.push('Pruning does NOT use single-sample snapshots.');
+    s.push('Cell Memory accumulates rolling-window metrics:');
+    s.push(' • max_charge_diff = max−min charge over last');
+    s.push('   epoch-worth of samples (window = training set)');
+    s.push(' • avg_gradient_magnitude = mean |grad| over');
+    s.push('   last epoch-worth of samples');
+    s.push(' • contributionScore = charge_diff × avg_grad');
+    s.push('These rolling values are what pruning checks.');
+    s.push('See V screen 0 for pruning readiness details.');
     return s.join('\n');
   }
 
@@ -1485,7 +1560,7 @@
         const c = state.cells[x][y][z]; if (!c) continue;
         totalH++;
         csScores.push(c.contributionScore);
-        const cd = c.genes[7];
+        const cd = config.autonomous_network_genes ? c.genes[7] : config.charge_delta;
         const fwd = c.max_charge_diff_forward > cd;
         const rev = c.max_charge_diff_reverse > cd;
         if (state.prune_logic === 'AND' ? !(fwd && rev) : !(fwd || rev)) wouldDieCharge++;
@@ -1514,6 +1589,29 @@
    p10=${pct(0.10).toExponential(2)}  p25=${pct(0.25).toExponential(2)}  p50=${pct(0.50).toExponential(2)}
    p75=${pct(0.75).toExponential(2)}  p90=${pct(0.90).toExponential(2)}  max=${pct(1.0).toExponential(2)}`;
     }
+    out += `\n\n── Key ───────────────────────────────────
+ ← net       = suggestion measured from live network
+ [gene 12/13]= threshold lives inside each cell
+ Fan-in      = avg connected upstream cells per neuron
+ Would die   = cells that fail this test RIGHT NOW¹
+ Contrib     = max(charge_diff) × avg|gradient|
+ Percentile  = bottom N% killed by rank each epoch²
+
+── How pruning metrics work ──────────────
+¹ "Would die" previews current cell memory.
+  Cell memory uses ROLLING WINDOWS (not single
+  samples):
+   • charge_diff = max−min charge over last N
+     samples (N = training set size = 1 epoch)
+   • avg_gradient = mean |gradient| over last
+     N samples
+   • contributionScore = charge_diff × avg_grad
+  P/O pruning checks these rolling values each
+  evolution step. Cells only die after they've
+  been consistently inactive across many samples.
+² Percentile pruning runs once at EPOCH BOUNDARY.
+  Ranks all cells by contributionScore and kills
+  the bottom N%. Set via C key.`;
     return out;
   }
 
@@ -1868,11 +1966,21 @@
     root.position.z = state.zoom * 0.4;
   }
 
+  function dispose3dBackpropChildren() {
+    const bg = g3.backpropGroup;
+    while (bg.children.length) {
+      const ch = bg.children[0];
+      bg.remove(ch);
+      if (ch.geometry) ch.geometry.dispose();
+      if (ch.material) ch.material.dispose();
+    }
+  }
+
   function render3dNetwork(state, config) {
     if (state._3d_dirty) rebuild3dCache(state, config);
     refresh3dColors(state, config);
     apply3dCamera(state);
-    while (g3.backpropGroup.children.length) g3.backpropGroup.remove(g3.backpropGroup.children[0]);
+    dispose3dBackpropChildren();
     g3.renderer.render(g3.scene, g3.camera);
     const hud = document.getElementById('hud3d');
     hud.style.display = 'block';
@@ -1888,7 +1996,7 @@
     if (state._3d_dirty) rebuild3dCache(state, config);
     refresh3dColors(state, config);
     apply3dCamera(state);
-    while (g3.backpropGroup.children.length) g3.backpropGroup.remove(g3.backpropGroup.children[0]);
+    dispose3dBackpropChildren();
     const nl = config.num_layers, halfW = WIDTH / 2, halfH = HEIGHT / 2;
     const z = cz * 2 - nl;
     const px = cx - halfW, py = cy - halfH;
@@ -2020,24 +2128,32 @@
       });
     }
 
-    const helpKeys = Object.keys(HELP_SCREEN);
-    const HELP_STATIC_BASE = QUICK_START + '\n\n' + helpKeys.map((k) => `── ${k} ──\n${HELP_SCREEN[k]}`).join('\n\n');
-    function scrollHelpToKey(key) {
-      if (!helpScroll) return;
-      const needle = `── ${key} ──`;
-      const pos = HELP_STATIC_BASE.indexOf(needle);
-      if (pos < 0) return;
-      const line = HELP_STATIC_BASE.slice(0, pos).split('\n').length - 1;
-      const lh = parseFloat(getComputedStyle(helpScroll).lineHeight);
-      const lineHeight = Number.isFinite(lh) && lh > 0 ? lh : 17;
-      helpScroll.scrollTop = Math.max(0, line * lineHeight - 8);
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+    let helpPanelDomBuilt = false;
+    function ensureHelpPanelDom() {
+      if (helpPanelDomBuilt || !helpScroll) return;
+      helpPanelDomBuilt = true;
+      const body = (typeof README_HTML === 'string' && README_HTML.length)
+        ? README_HTML
+        : '<p><strong>README not embedded.</strong> Run <code>python3 build_neurosim_web.py</code> (needs <code>pip install markdown</code>).</p>';
+      helpScroll.innerHTML =
+        '<section class="quick-start"><h2 class="quick-h">Quick start (MNIST &amp; keys)</h2>' +
+        '<pre class="quick-pre">' + escapeHtml(QUICK_START) + '</pre></section>' +
+        '<article class="readme-body">' + body + '</article>' +
+        '<hr class="help-sep" /><h2 class="help-log-h">Session log</h2>' +
+        '<pre id="helpLog" class="help-log"></pre>';
     }
     function drawHelpPanel() {
       if (!helpScroll) return;
-      const prev = helpScroll.scrollTop;
-      const log = state.side_panel_text.slice(-40).join('\n');
-      helpScroll.textContent = HELP_STATIC_BASE + '\n\n── Log ──\n' + log;
-      helpScroll.scrollTop = prev;
+      ensureHelpPanelDom();
+      const logEl = document.getElementById('helpLog');
+      if (logEl) logEl.textContent = state.side_panel_text.slice(-40).join('\n');
     }
     (function initColSplitter() {
       if (!colSplitter || !document.getElementById('side')) return;
@@ -2123,21 +2239,52 @@
       if (!state.show_3d_view) doDraw2d();
       else state._3d_dirty = true;
     }
-    /** tag e.g. '' or '-perfect' — matches desktop save_file(..., tag) naming hint */
+    /** M=MNIST F=Fashion; first letter of other dataset names; U if missing. */
+    function trainingDatasetCodeFromRoot(obj) {
+      const d = obj && obj.dataset != null ? String(obj.dataset).toLowerCase().trim() : '';
+      if (d === 'mnist') return 'M';
+      if (d === 'fashion') return 'F';
+      if (d.length && /^[a-z]/i.test(d)) return d.charAt(0).toUpperCase();
+      return 'U';
+    }
+    /** One letter from best epoch correct/total: P=100%, A=90–99%, … J=10–19%, K=<10% nonzero, N=0, X=no samples. */
+    function saveFilenameAccuracyLetter(maxCorrect, total) {
+      if (total <= 0) return 'X';
+      if (maxCorrect >= total) return 'P';
+      const r = maxCorrect / total;
+      if (r >= 0.9) return 'A';
+      if (r >= 0.8) return 'B';
+      if (r >= 0.7) return 'C';
+      if (r >= 0.6) return 'D';
+      if (r >= 0.5) return 'E';
+      if (r >= 0.4) return 'F';
+      if (r >= 0.3) return 'G';
+      if (r >= 0.2) return 'H';
+      if (r >= 0.1) return 'I';
+      if (r > 0) return 'J';
+      return 'N';
+    }
+    /** tag e.g. '' or '-perfect' — filename starts with accuracy letter + dataset letter (e.g. PM = perfect MNIST). */
     function downloadSimulationJson(tag) {
-      const payload = { version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles };
+      const g = saveFilenameAccuracyLetter(state.max_bingo_count, config.how_much_training_data);
+      const d = /^[A-Z]$/i.test(state.training_dataset_code || '') ? String(state.training_dataset_code).toUpperCase() : 'X';
+      const payload = {
+        version: 1, config: configToJSON(config), cells: serializeCells(state.cells), training_cycles: state.training_cycles,
+        training_dataset_code: d, max_bingo_count: state.max_bingo_count, bingo_count: state.bingo_count,
+      };
       const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       const ts = Date.now();
-      a.download = tag
-        ? `neurosim_${config.num_layers}_${config.number_of_weights}_${state.bingo_count}_${config.how_much_training_data}${tag}_${ts}.json`
-        : `neurosim_${ts}.json`;
+      const core = `${g}${d}_${config.num_layers}_${config.number_of_weights}_${state.bingo_count}_${config.how_much_training_data}`;
+      const fname = tag ? `neurosim_${core}${tag}_${ts}.json` : `neurosim_${core}_${ts}.json`;
+      a.download = fname;
       a.click();
       URL.revokeObjectURL(a.href);
+      return fname;
     }
-    function doRenderBackprop(layer, pos) {
-      const [x, y] = pos;
+    /* Must match backPropagation: renderBackpropFn(z, x, y) — not (layer, [x,y]). */
+    function doRenderBackprop(layer, x, y) {
       render3dBackprop(state, config, layer, x, y);
     }
 
@@ -2180,12 +2327,12 @@
         } else uiPrint('No cell at this location');
         return;
       }
-      if (e.button === 0) {
+        if (e.button === 0) {
         if (state.cells[cx][cy][layer] == null) {
           state.cells[cx][cy][layer] = new Cell(layer, cx, cy, config.number_of_weights, config.bias_range, config.avg_weights_cell,
             config.charge_delta, config.weight_decay, config.mutation_rate, null);
         } else state.cells[cx][cy][layer] = null;
-        state.mouse_up = false; state.invalidateNeighborCache();
+        state.mouse_up = false; state.invalidateNeighborCache(); state._3d_dirty = true;
         doDraw2d();
       }
     });
@@ -2196,7 +2343,7 @@
       if (state.cells[cx][cy][layer] == null) {
         state.cells[cx][cy][layer] = new Cell(layer, cx, cy, config.number_of_weights, config.bias_range, config.avg_weights_cell,
           config.charge_delta, config.weight_decay, config.mutation_rate, null);
-        state.invalidateNeighborCache();
+        state.invalidateNeighborCache(); state._3d_dirty = true;
         doDraw2d();
       }
     });
@@ -2214,8 +2361,12 @@
         return;
       }
       if (!state.show_3d_view && k.toLowerCase() === 'h') {
-        state.current_index = (state.current_index + 1) % helpKeys.length;
-        scrollHelpToKey(helpKeys[state.current_index]);
+        ensureHelpPanelDom();
+        /* Quick-start title first, then every ## in the README preview */
+        const heads = helpScroll ? helpScroll.querySelectorAll('.quick-start h2.quick-h, .readme-body h2') : [];
+        if (heads.length === 0) return;
+        state.current_index = (state.current_index + 1) % heads.length;
+        heads[state.current_index].scrollIntoView({ block: 'start', behavior: 'smooth' });
         return;
       }
       if (k === ' ') { state.running = !state.running; return; }
@@ -2281,7 +2432,15 @@
       }
       if (k === '4') {
         state.show_backprop_view = !state.show_backprop_view;
-        if (state.show_backprop_view) { state.show_3d_view = true; layout2d3d(); }
+        if (state.show_backprop_view) {
+          state.show_3d_view = true; layout2d3d();
+          /* Auto-switch to Error color mode so you see backprop activity across the full network */
+          state._3d_color_mode = 1;
+          uiPrint('Backprop view ON — color: Error (G to cycle). Full network updates each sample.');
+        } else {
+          state._3d_color_mode = 0;
+          uiPrint('Backprop view OFF — color: Charge');
+        }
         state._3d_dirty = true; return;
       }
       if (k.toLowerCase() === 't') {
@@ -2296,12 +2455,11 @@
         const ds = await showModal(
           'Load training data\n\n'
           + 'Type J + OK = choose a local .json file (from mnist_to_neurosim_web_json.py)\n'
-          + 'Type D + OK = fetch MNIST demo (500 samples) from same folder / GitHub\n'
+          + 'Type D + OK = fetch a 500-sample demo from same folder / GitHub (then pick MNIST vs Fashion)\n'
           + 'Type M + OK = synthetic random images (no file)\n\n'
           + 'Enter J, D, or M:',
           'J'
         );
-        if ((ds || '').toLowerCase() === 'f') uiPrint(FASHION_LABELS);
         const n = await showModal('How many samples per training cycle? (must be ≤ rows in JSON file, e.g. 500)', config.how_much_training_data);
         const st = await showModal('Start index into dataset (usually 0):', config.start_index);
         let ns = n != null && !Number.isNaN(+n) ? Math.max(1, (+n) | 0) : config.how_much_training_data;
@@ -2357,6 +2515,7 @@
                     config.how_much_training_data = state.training_data_layer_0.length;
                     state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
                     state.training_data_loaded = true;
+                    state.training_dataset_code = trainingDatasetCodeFromRoot(obj);
                     state.reset_training_metrics();
                     state._training_sample_i = null;
                     showLoadedTrainingPreview();
@@ -2370,11 +2529,21 @@
               fp.click();
             });
           } else if ((ds || '').toLowerCase() === 'd') {
-            /* Fetch demo MNIST JSON from server (works on GitHub Pages or local http server) */
-            uiPrint('Fetching mnist_demo_500.json …');
+            const demoPick = await showModal(
+              'Which hosted demo (500 samples each)?\n\n'
+              + 'M + OK = MNIST (mnist_demo_500.json)\n'
+              + 'F + OK = Fashion-MNIST (fashion-mnist_demo_500.json)\n\n'
+              + 'Enter M or F:',
+              'M'
+            );
+            const useFashion = (demoPick || 'm').toLowerCase().trim().startsWith('f');
+            const demoFile = useFashion ? 'fashion-mnist_demo_500.json' : 'mnist_demo_500.json';
+            if (useFashion) uiPrint(FASHION_LABELS);
+            /* Fetch demo JSON from server (works on GitHub Pages or local http server) */
+            uiPrint('Fetching ' + demoFile + ' …');
             try {
-              const resp = await fetch('mnist_demo_500.json');
-              if (!resp.ok) throw new Error(`HTTP ${resp.status} – is the file in the same folder?`);
+              const resp = await fetch(demoFile);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status} – is ${demoFile} in the same folder?`);
               const obj = JSON.parse(await resp.text());
               const ar = obj.samples != null ? obj.samples : (Array.isArray(obj) ? obj : null);
               if (!Array.isArray(ar) || !ar.length) throw new Error('No samples array in file');
@@ -2394,6 +2563,7 @@
                 config.how_much_training_data = state.training_data_layer_0.length;
                 state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
                 state.training_data_loaded = true;
+                state.training_dataset_code = trainingDatasetCodeFromRoot(obj);
                 state.reset_training_metrics();
                 state._training_sample_i = null;
                 showLoadedTrainingPreview();
@@ -2409,6 +2579,7 @@
             }
             state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
             state.training_data_loaded = true;
+            state.training_dataset_code = 'S';
             state.reset_training_metrics();
             state._training_sample_i = null;
             showLoadedTrainingPreview();
@@ -2448,7 +2619,7 @@
               if (c) c.remapWeights(config.length_of_dendrite);
             }
         }
-        state.invalidateNeighborCache();
+        state.invalidateNeighborCache(); state._3d_dirty = true;
         /* Auto-update avg_weights_cell when dendrite changes */
         if (config.number_of_weights !== oldNumWeights) {
           const mfi = computeAvgFanIn(state, config);
@@ -2477,7 +2648,7 @@
               c.colorGenes(); c.initializeNetworkProteins(); c.colorProteins();
             }
           }
-        state.not_saved_yet = true; state.reset_training_metrics();
+        state.not_saved_yet = true; state._3d_dirty = true; state.reset_training_metrics();
         uiPrint(`Reset weights+bias. fan-in=${config.avg_weights_cell}, bias_range=${config.bias_range}, He scale=√(2/${config.avg_weights_cell})=${Math.sqrt(2/config.avg_weights_cell).toFixed(3)}`);
         return;
       }
@@ -2486,14 +2657,14 @@
         if ((ok || '').toLowerCase() === 'y') {
           for (let z = 1; z < config.num_layers - 1; z++)
             for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) state.cells[x][y][z] = null;
-          state.invalidateNeighborCache(); state.reset_training_metrics();
+          state.invalidateNeighborCache(); state._3d_dirty = true; state.reset_training_metrics();
         }
         return;
       }
       if (k.toLowerCase() === 's') {
-        downloadSimulationJson('');
+        const fn = downloadSimulationJson('');
         state.not_saved_yet = false;
-        uiPrint('Saved JSON (download started)');
+        uiPrint('Saved ' + fn + '  (1st letter=epoch max correct tier P..N, 2nd=M/F/S/U/X dataset)');
         return;
       }
       if (k.toLowerCase() === 'l' && !state.show_3d_view) {
@@ -2510,7 +2681,16 @@
                 Cell.setConfig(config);
                 state.cells = deserializeCells(obj.cells, config);
                 state.training_cycles = obj.training_cycles || 0;
-                state.invalidateNeighborCache();
+                if (obj.training_dataset_code != null && String(obj.training_dataset_code).length === 1)
+                  state.training_dataset_code = String(obj.training_dataset_code).toUpperCase();
+                if (obj.max_bingo_count != null) state.max_bingo_count = +obj.max_bingo_count;
+                /* Reset mid-epoch training state so the next tick starts a fresh epoch.
+                   Without this, _training_sample_i can point past the data array (crash),
+                   and bingo_count from the saved file gets double-counted into the current epoch. */
+                state._training_sample_i = null;
+                state._shuffle_order = null;
+                state.bingo_count = 0;
+                state.invalidateNeighborCache(); state._3d_dirty = true;
                 uiPrint('Loaded JSON state');
               } catch (err) { uiPrint('Load error: ' + err); }
               res();
@@ -2545,17 +2725,23 @@
       requestAnimationFrame(tick);
       /* neurosim/main.py: autosave when a full training batch is ever classified perfectly */
       if (state.max_bingo_count === config.how_much_training_data && state.not_saved_yet) {
-        downloadSimulationJson('-perfect');
+        const fn = downloadSimulationJson('-perfect');
         state.not_saved_yet = false;
-        uiPrint('Perfect batch: auto-saved JSON (tag -perfect).');
+        uiPrint('Perfect epoch: auto-saved ' + fn);
       }
       if (state.running) updateCells(state, config);
       if (state.training_mode) {
+        /* Guard: if data was reloaded or network loaded, clamp setSize to actual data length */
+        const actualDataLen = state.training_data_layer_0.length;
+        if (config.how_much_training_data > actualDataLen && actualDataLen > 0) {
+          config.how_much_training_data = actualDataLen;
+        }
         const setSize = config.how_much_training_data;
-        const renderBp = state.show_3d_view && state.show_backprop_view && state.display_updating ? doRenderBackprop : null;
         try {
           /* Always one sample per rAF — keeps browser responsive. D key only toggles cell drawing, not training pace or graphs. */
           if (state._training_sample_i == null) state._training_sample_i = 0;
+          /* If sample counter somehow exceeds data, reset to start of next epoch */
+          if (state._training_sample_i >= setSize) state._training_sample_i = 0;
           if (state._training_sample_i === 0) {
             state.bingo_count = 0;
             state._batch_loss_sum = 0;
@@ -2569,11 +2755,8 @@
             }
           }
           const i = state._training_sample_i;
-          trainOnSample(state, config, i, renderBp, pred);
-          if (state.display_updating) {
-            if (!state.show_3d_view) doDraw2d();
-            else state._3d_dirty = true;
-          }
+          trainOnSample(state, config, i, null, pred);
+          if (state.display_updating && !state.show_3d_view) doDraw2d();
           state._training_sample_i++;
           if (state._training_sample_i >= setSize) {
             const ba = state._batch_loss_sum / Math.max(1, state._batch_sample_count);
@@ -2582,7 +2765,7 @@
             /* Epoch-boundary percentile pruning (competitive / trophic factor) */
             if (config.prune_percentile > 0 && (state.prune || state.gradient_prune)) {
               const killed = percentilePrune(state, config);
-              if (killed > 0) { uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`); state._3d_dirty = true; }
+              if (killed > 0) uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`);
             }
             if (state.show_training_stats && state.training_cycles % state.stats_update_frequency === 0) {
               updateTrainingStats(state, config);
@@ -2590,11 +2773,10 @@
             }
           }
         } catch (err) { console.error(err); uiPrint('Training error: ' + err); }
-        state._3d_dirty = true;
       }
       if (state.display_updating) {
         if (state.show_3d_view) {
-          if (!state.show_backprop_view) render3dNetwork(state, config);
+          render3dNetwork(state, config);
         } else {
           doDraw2d();
         }
@@ -2615,7 +2797,9 @@
         `Dir=${state.direction_of_charge_flow} BackP=${state.back_prop} Disp=${state.display_updating} | ` +
         `Epoch=${state.training_cycles}${epochProgress} Samples=${config.how_much_training_data} K=${K} | ` +
         `EpochLoss=${lastEpochLoss} BatchLoss=${lastMinibatchLoss} | Correct=${state.bingo_count}/${config.how_much_training_data} Max=${state.max_bingo_count}`;
-      if (!state.training_mode && !state.show_3d_view) {
+      /* When training stops, keep the last loss graphs visible (don't blank them).
+         Only clear plots when there is no training data at all. */
+      if (!state.training_mode && !state.training_data_loaded && !state.show_3d_view) {
         pred.fillRect(0, 0, pred.canvas.width, pred.canvas.height);
         if (predBatch) predBatch.fillRect(0, 0, predBatch.canvas.width, predBatch.canvas.height);
       }
