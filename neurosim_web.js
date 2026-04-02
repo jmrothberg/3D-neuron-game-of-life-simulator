@@ -1979,9 +1979,10 @@
       if (k.toLowerCase() === 'm' && !state.show_3d_view) {
         const ds = await showModal(
           'Load training data\n\n'
-          + 'Type J + OK = choose mnist_training_web.json (from mnist_to_neurosim_web_json.py)\n'
+          + 'Type J + OK = choose a local .json file (from mnist_to_neurosim_web_json.py)\n'
+          + 'Type D + OK = fetch MNIST demo (500 samples) from same folder / GitHub\n'
           + 'Type M + OK = synthetic random images (no file)\n\n'
-          + 'Enter J or M:',
+          + 'Enter J, D, or M:',
           'J'
         );
         if ((ds || '').toLowerCase() === 'f') uiPrint(FASHION_LABELS);
@@ -2052,6 +2053,37 @@
               };
               fp.click();
             });
+          } else if ((ds || '').toLowerCase() === 'd') {
+            /* Fetch demo MNIST JSON from server (works on GitHub Pages or local http server) */
+            uiPrint('Fetching mnist_demo_500.json …');
+            try {
+              const resp = await fetch('mnist_demo_500.json');
+              if (!resp.ok) throw new Error(`HTTP ${resp.status} – is the file in the same folder?`);
+              const obj = JSON.parse(await resp.text());
+              const ar = obj.samples != null ? obj.samples : (Array.isArray(obj) ? obj : null);
+              if (!Array.isArray(ar) || !ar.length) throw new Error('No samples array in file');
+              const isCompact = ar[0] && ar[0].c != null && ar[0].l != null;
+              const layerLastIdx = obj.layer_last_index_note || (config.num_layers - 1);
+              const fromFile = ar.length - ss;
+              const nUse = Math.max(0, Math.min(ns, fromFile));
+              if (nUse === 0) { uiPrint(`No samples at start_index=${ss}`); }
+              else {
+                for (let i = 0; i < nUse; i++) {
+                  const raw = ar[ss + i];
+                  const row = isCompact ? expandCompactSample(raw, layerLastIdx) : raw;
+                  if (!row || !row.layer0 || !row.layerLast) continue;
+                  state.training_data_layer_0.push(row.layer0);
+                  state.training_data_num_layer_minus_1.push(row.layerLast);
+                }
+                config.how_much_training_data = state.training_data_layer_0.length;
+                state.total_weights_list = new Float64Array(config.how_much_training_data + 10);
+                state.training_data_loaded = true;
+                state.reset_training_metrics();
+                state._training_sample_i = null;
+                showLoadedTrainingPreview();
+                uiPrint(`Loaded ${state.training_data_layer_0.length} demo samples. Press T to train.`);
+              }
+            } catch (err) { uiPrint('Demo fetch failed: ' + err.message); }
           } else {
             config.how_much_training_data = ns;
             for (let i = 0; i < config.how_much_training_data; i++) {

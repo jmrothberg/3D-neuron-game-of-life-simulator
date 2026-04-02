@@ -424,36 +424,103 @@ MNIST and Fashion-MNIST data must be preprocessed into per-image pickle files. S
 - **Fashion-MNIST:** 98/100 on similar architecture
 - Networks survive save/reload and can continue training or evolution
 
-## Browser port (single-file HTML)
+## Browser Version (JavaScript / Single-File HTML)
 
-**Status:** The HTML/JS simulator is a **work in progress**. It is meant to mirror the desktop `neurosim/` behavior and share the same help text, but there are intentional and accidental differences (see parity notes below). Prefer the Python entry point for research runs and for anything that must match the shipped desktop build exactly.
+### Try it now — no install required
 
-**Why `build_neurosim_web.py`?** The editable simulation logic lives in `neurosim_web.js`. The build script generates **`neurosim_web.html`** as a **single file** you can open without a local server: it reads `neurosim_web.js`, pulls the long help strings from `get_help_defs.py` (same source as the desktop **H** screens), injects them as a `HELP_SCREEN` JSON object, and inlines the full script. That way help and UI code stay in sync when you re-run the builder instead of copying text by hand. If you change only `neurosim_web.js`, run the build again before relying on the HTML file. You can also wire up your own page that loads `neurosim_web.js` externally and defines `HELP_SCREEN` yourself; the builder is optional but recommended for the checked-in standalone page.
+**[▶ Run in your browser](https://jmrothberg.github.io/3D-neuron-game-of-life-simulator/neurosim_web.html)**
 
-Regenerate the standalone page with:
+The link opens the simulator on GitHub Pages. Press **M** → **D** → **OK** to auto-fetch the bundled 500-sample MNIST demo, then **T** to start training. Everything runs client-side in your browser — no server, no Python, no downloads.
+
+---
+
+### Overview
+
+The web version is a full reimplementation of the desktop `neurosim/` simulator in JavaScript + HTML Canvas + Three.js. All simulation logic lives in **`neurosim_web.js`**; the build script `build_neurosim_web.py` inlines it (plus help text from `get_help_defs.py`) into the standalone **`neurosim_web.html`**.
+
+### Key Features (Web Version)
+
+| Feature | Details |
+|---------|---------|
+| **Full neural-network training** | Forward pass, backpropagation, weight/bias updates, cross-entropy loss — identical algorithm to the Python version |
+| **Epoch-based training loop** | One epoch = one full pass over all loaded samples; epochs are counted and displayed in the status bar |
+| **Minibatch gradient accumulation** | Configurable batch size **K** (gradient_minibatch_size in **E** menu); gradients accumulate over K samples before one weight update |
+| **Epoch shuffling** | Training samples are Fisher-Yates shuffled at the start of each epoch (toggle `shuffle_epoch` in config) |
+| **Dual loss plots** | Separate scrolling plots for per-minibatch loss (blue) and per-epoch loss (green), each with an independent Y-axis scale slider |
+| **Live status bar** | Shows: display toggle state (Disp), current epoch with progress, total samples seen, minibatch size K, epoch loss, batch loss, correct predictions, and max correct |
+| **Dedicated statistics pane** | Right panel is split into Help (top) and Stats (bottom) with a draggable splitter; stats show per-layer metrics, per-digit accuracy, gradient flow, charge distribution, dead neurons, weight utilization |
+| **Smart defaults** | Auto-computes `avg_weights_cell` from actual network fan-in for proper He initialization; improved defaults for weight decay (1e-5), charge delta (0.01), gradient threshold (1e-4), gradient clip (0.5), activation slope (0.01) |
+| **Weight-magnitude pruning** | Cells whose maximum absolute weight falls below `weight_prune_threshold` (default 0.01) are pruned when activity pruning is active |
+| **He initialization** | Weight reset (**X** key) measures average effective fan-in and scales initial weights as `randn × √(2/fan_in)` |
+| **Compact MNIST format** | Training JSON stores only pixel charges + label per sample (~2 MB / 500 samples vs ~380 MB verbose); auto-detected on load |
+| **Demo data fetch** | **M** → **D** fetches `mnist_demo_500.json` from the server (works on GitHub Pages and local HTTP); no file picker needed |
+| **3D visualization** | Three.js orbit-camera view of all layers; backprop highlight mode (**4** key) |
+| **Save / Load** | **S** exports full network state as JSON; **L** imports it; auto-downloads a `-perfect` snapshot when max correct hits 100% |
+| **Display toggle** | **D** key toggles only the expensive cell rendering; training, graphs, and status bar always update for responsiveness |
+
+### Keyboard Controls (Web)
+
+All desktop keys are mapped. Key differences from the Python version:
+
+| Key | Web Action |
+|-----|------------|
+| **M** | Load training data — **J** (local file picker), **D** (fetch demo from server), or **M** (synthetic) |
+| **D** | Toggle cell display only (training + plots always run) |
+| **V** | Cycle statistics views → output goes to the dedicated stats pane |
+| **Q** | Dump per-layer telemetry → stats pane |
+| **H** | Cycle help screens (2D only) |
+| **?** | Quick-start scroll |
+| **E** | Edit all parameters interactively (includes `shuffle_epoch`, `weight_prune_threshold`, `gradient_minibatch_size`) |
+
+### Building the Standalone HTML
 
 ```bash
 python3 build_neurosim_web.py
 ```
 
-Open `neurosim_web.html` in a browser (network needed once for the Three.js CDN). Saves/loads simulation state as **JSON** (not Python pickle). Training: press **M** for synthetic mini-batches or choose **J** and pick a JSON file with `samples: [{ layer0, layerLast }, ...]` (each a 28×28 grid of cell objects or nulls, same shape as the desktop tensor).
+This reads `neurosim_web.js` and `get_help_defs.py`, injects help text as a `HELP_SCREEN` JSON object, and produces `neurosim_web.html`. Re-run after editing `neurosim_web.js`.
 
-**`file://` security errors:** Chromium may log *Unsafe attempt to load URL … from frame … 'file:' URLs are treated as unique security origins* if you open the HTML from disk (double-click) or inside some embedded preview panes. Each `file://` path can be treated as its own origin, so subframes or certain loads that used to work can start failing after a browser update, and the page may stop training or break 3D. **Fix:** serve the repo over HTTP from the project directory, then open the page by URL (not `file:`), for example: `python3 -m http.server 8765` and browse to `http://localhost:8765/neurosim_web.html`.
+### Running Locally
 
-**MNIST / Fashion-MNIST → web JSON** (downloads official IDX gzip URLs, stdlib only):
+**Option A — direct open:** Double-click `neurosim_web.html`. Works for most features, but Chromium may block some `file://` loads (see troubleshooting below).
+
+**Option B — local HTTP server (recommended):**
 
 ```bash
-python3 mnist_to_neurosim_web_json.py --dataset mnist --count 500 -o mnist_training_web.json
-# Fashion-MNIST: --dataset fashion
-# If download fails with CERTIFICATE_VERIFY_FAILED:
-python3 mnist_to_neurosim_web_json.py --count 500 --no-verify-ssl -o mnist_training_web.json
+python3 -m http.server 8765
+# then open http://localhost:8765/neurosim_web.html
 ```
 
-Then in the browser: **M** → **J** → select that file. Options: `--offset`, `--count` (training slice), `--cache-dir`.
+This avoids all `file://` security restrictions and enables the **M** → **D** demo-fetch path.
 
-**Feature coverage vs `neurosim/main.py` (desktop):** The web port maps the same keyboard workflow where possible: **Space, U, P, O, =, C, D, N, I, E, X, S, L, M, F, R, B, T, A, W, G, V, Q, 3, 4**, left-click paint, right-click / Ctrl+click inspect, training loop + prediction strip, 3D orbit/zoom, and autosave when **Max correct** reaches a full batch (desktop writes pickle **`-perfect`**; browser downloads JSON with **`-perfect`** in the filename). **H** cycles help only in 2D, like pygame. Extra: **?** quick-start scroll.
+### Loading MNIST Training Data
 
-**Known gaps / differences:** Pickle **saved_states/** and per-run **.png** icons are desktop-only; **L** loads **JSON** you export with **S** (or share a state file), not the pygame thumbnail browser. MNIST in pygame reads prepared **pickle folders** on disk (**M** → **M** vs **F**); the browser uses **J** + `mnist_to_neurosim_web_json.py` (or **M** synthetic). **`state.timing`** evolution prints are not wired to UI. **Parity notes:** float RNG differs from NumPy; 3D backprop highlight differs from OpenGL; tab close replaces pygame quit + stdin **y/n**.
+**Quick (demo, 500 samples):** Press **M** → **D** → **OK**. The 500-sample compact JSON is fetched automatically.
+
+**Full dataset (up to 5000 samples):** Generate a local file with the conversion script:
+
+```bash
+python3 mnist_to_neurosim_web_json.py --dataset mnist --count 5000 -o mnist_training_web.json
+# Fashion-MNIST: --dataset fashion
+# SSL issues: add --no-verify-ssl
+```
+
+Then press **M** → **J** → select the file. Options: `--offset`, `--count`, `--cache-dir`.
+
+The compact format (default) stores only charge values and labels — ~22 MB for 5000 samples vs ~1.9 GB verbose. Use `--verbose-cells` for the old format if needed.
+
+### Troubleshooting
+
+**`file://` security errors:** Chromium may log *"Unsafe attempt to load URL … 'file:' URLs are treated as unique security origins"*. Each `file://` path is treated as its own origin, so subframe loads and fetch calls can fail. **Fix:** serve the repo over HTTP (`python3 -m http.server 8765`) and open via `http://localhost:8765/neurosim_web.html`.
+
+**Large JSON files crashing the browser:** If you generated verbose-format JSON for thousands of samples, the file can be 1+ GB. Use the compact format (default in `mnist_to_neurosim_web_json.py`) or reduce `--count`.
+
+### Known Gaps vs Desktop
+
+- Pickle **saved_states/** and per-run **.png** icons are desktop-only; **L** loads JSON exported with **S**
+- MNIST in pygame reads prepared pickle folders (**M** → **M** vs **F**); the browser uses **J**/**D** + JSON
+- `state.timing` evolution prints are not wired to the UI
+- Float RNG differs from NumPy; 3D backprop highlight differs from OpenGL; tab close replaces pygame quit
 
 ## Author
 
