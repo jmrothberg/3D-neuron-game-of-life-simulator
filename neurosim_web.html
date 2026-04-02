@@ -106,13 +106,13 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
 
   /* Expand compact training sample {c:[784 charges], l:label} into {layer0, layerLast} cell-JSON grids.
      Compact format written by mnist_to_neurosim_web_json.py v2 — ~100x smaller than full cell objects. */
-  const _COMPACT_GENES = [15,2,3,10, 9,0.01,5,0.001,1e-6, 0.01,1e-7,0.1];
+  const _COMPACT_GENES = [15,2,3,10, 9,0.01,5,0.001,1e-6, 0.01,1e-7,0.1, 0.01,0];
   function _compactCell(layer, x, y, charge) {
     return {x:x, y:y, layer:layer, genes:_COMPACT_GENES, weights:[0,0,0,0,0,0,0,0,0],
       bias:0, charge:charge, error:EPS, gradient:0, reach:1,
       forward_charges:[], reverse_charges:[], max_charge_diff_forward:0, max_charge_diff_reverse:0,
       significant_charge_change_forward:false, significant_charge_change_reverse:false,
-      gradient_history:[], avg_gradient_magnitude:0, significant_gradient_change:false};
+      gradient_history:[], avg_gradient_magnitude:0, significant_gradient_change:false, contributionScore:0};
   }
   function expandCompactSample(sample, layerLast) {
     const charges = sample.c, label = sample.l;
@@ -205,6 +205,10 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       shuffle_epoch: true,
       /* Prune cells where max |weight| < this threshold (weight-magnitude pruning via O key combo) */
       weight_prune_threshold: 0.01,
+      /* Contribution-score threshold: cells with score < this die (0 = off). Score = charge_diff × gradient. */
+      min_contribution_score: 0,
+      /* Percentile pruning: kill bottom N% of cells by contribution score each epoch (0 = off, e.g. 10 = bottom 10%) */
+      prune_percentile: 0,
     };
     c.updateDerived = function () {
       this.weight_matrix = 2 * this.length_of_dendrite + 1;
@@ -243,6 +247,81 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     return count > 0 ? totalFanIn / count : config.number_of_weights;
   }
 
+  /* Scan the live network to suggest sensible defaults for key parameters.
+     Returns an object with suggested values and the measurements they came from. */
+  function suggestParams(state, config) {
+    const nl = config.num_layers;
+    let nCells = 0, totalFanIn = 0;
+    const gradMags = [], chargeMags = [], errorMags = [], weightMags = [];
+    const biasAbs = [];
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (!c) continue;
+        nCells++;
+        gradMags.push(Math.abs(c.gradient));
+        chargeMags.push(Math.abs(c.charge));
+        errorMags.push(Math.abs(c.error));
+        biasAbs.push(Math.abs(c.bias));
+        let wSum = 0, fan = 0;
+        const r = config.autonomous_network_genes ? c.reach : config.length_of_dendrite;
+        for (let i = 0; i < c.weights.length; i++) wSum += Math.abs(c.weights[i]);
+        weightMags.push(c.weights.length > 0 ? wSum / c.weights.length : 0);
+        for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT && state.cells[nx][ny][z - 1]) fan++;
+        }
+        totalFanIn += fan;
+      }
+    if (nCells === 0) return null;
+    gradMags.sort((a, b) => a - b);
+    chargeMags.sort((a, b) => a - b);
+    errorMags.sort((a, b) => a - b);
+    weightMags.sort((a, b) => a - b);
+    biasAbs.sort((a, b) => a - b);
+    const pct = (arr, p) => arr[Math.min(((p * arr.length) | 0), arr.length - 1)];
+    const med = (arr) => pct(arr, 0.5);
+
+    const avgFanIn = totalFanIn / nCells;
+    const medGrad = med(gradMags);
+    const p25Grad = pct(gradMags, 0.25);
+    const medWeight = med(weightMags);
+    const medCharge = med(chargeMags);
+    const medError = med(errorMags);
+    const medBias = med(biasAbs);
+
+    /* Learning rate: ~1/fan_in is a safe starting point; clamp to reasonable range */
+    const sugLR = clip(1.0 / Math.max(avgFanIn, 1), 0.001, 0.05);
+    /* Charge delta: set at ~10th percentile of charge magnitudes so only truly silent cells get pruned */
+    const sugCD = Math.max(1e-6, pct(chargeMags, 0.10));
+    /* Gradient threshold: set at ~10th percentile of gradient magnitudes */
+    const sugGT = Math.max(1e-8, pct(gradMags, 0.10));
+    /* Weight decay: smaller when weights are small, larger when weights are big */
+    const sugWD = clip(medWeight > 0 ? 0.01 * medWeight : 1e-5, 1e-6, 1e-3);
+    /* Bias range for He init: based on current network bias magnitudes */
+    const sugBR = clip(medBias > 0 ? medBias * 2 : 0.01, 0.001, 0.1);
+    /* Weight prune threshold: below 10th percentile of avg weight magnitudes */
+    const sugWPT = Math.max(1e-4, pct(weightMags, 0.10));
+    /* Activation slope: keep current unless evidence suggests otherwise */
+    const sugAS = config.activation_slope;
+    /* Gradient clip: ~2× the 95th percentile gradient */
+    const p95Grad = pct(gradMags, 0.95);
+    const sugGCR = clip(p95Grad > 0 ? p95Grad * 2 : 0.5, 0.1, 5.0);
+
+    return {
+      nCells, avgFanIn,
+      medGrad, p25Grad, medWeight, medCharge, medError, medBias,
+      lr: +sugLR.toPrecision(3),
+      charge_delta: +sugCD.toPrecision(2),
+      gradient_threshold: +sugGT.toPrecision(2),
+      weight_decay: +sugWD.toPrecision(2),
+      bias_range: +sugBR.toPrecision(2),
+      weight_prune_threshold: +sugWPT.toPrecision(2),
+      activation_slope: sugAS,
+      gradient_clip_range: +sugGCR.toPrecision(2),
+      avg_weights_cell: Math.max(1, Math.round(avgFanIn)),
+    };
+  }
+
   function makeCellsGrid() {
     const cells = new Array(WIDTH);
     for (let x = 0; x < WIDTH; x++) {
@@ -261,7 +340,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       andromida_mode: false, charge_change_protection: true, back_prop: false,
       training_data_loaded: false, display_updating: true, simulating: true, not_saved_yet: true,
       prune_logic: 'OR', display: 'proteins', direction_of_charge_flow: '+++++>>>>>',
-      show_3d_view: false, show_backprop_view: false, show_training_stats: false, display_set: 0,
+      show_3d_view: false, show_backprop_view: false, show_training_stats: false, display_set: 0, _3d_color_mode: 0,
       bingo_count: 0, max_bingo_count: 0, total_cells: 0, total_loss: 0, total_predictions: 0,
       running_avg_loss: 0, last_step_loss: 0, training_cycles: 0, total_weights: 0,
       total_weights_list: new Float64Array(1000),
@@ -328,11 +407,12 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       this.significant_charge_change_forward = false; this.significant_charge_change_reverse = false;
       this.number_of_upper_layer_cells = 0; this.number_of_lower_layer_cells = 0;
       this.gradient_history = []; this.avg_gradient_magnitude = 0; this.significant_gradient_change = false;
+      this.contributionScore = 0;
     }
     initalizeAllGenes() {
-      this.genes = new Array(12).fill(0);
-      this.colors = new Array(12).fill(0);
-      this.protein_colors = new Array(12).fill(0);
+      this.genes = new Array(14).fill(0);
+      this.colors = new Array(14).fill(0);
+      this.protein_colors = new Array(14).fill(0);
     }
     initalizeBreedingGenes() {
       const cfg = CellConfig;
@@ -349,6 +429,8 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         this.genes[9] = cfg ? cfg.learning_rate : 0.01;
         this.genes[10] = cfg ? cfg.gradient_threshold : 1e-7;
         this.genes[11] = cfg ? cfg.activation_slope : 0.1;
+        this.genes[12] = cfg ? cfg.weight_prune_threshold : 0.01;
+        this.genes[13] = cfg ? cfg.min_contribution_score : 0;
       } else {
         this.genes[3] = randInt(0, 99);
         this.genes[4] = Math.pow(randInt(1, 3) * 2 + 1, 2);
@@ -363,6 +445,8 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         this.genes[9] = uniform(0.003, 0.05);
         this.genes[10] = Math.pow(10, uniform(-8, -4));
         this.genes[11] = uniform(0.01, 0.3);
+        this.genes[12] = Math.pow(10, uniform(-3, -1));
+        this.genes[13] = Math.pow(10, uniform(-6, -2));
       }
       this.colorGenes();
     }
@@ -397,7 +481,13 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       const g10v = clip(this.genes[10], 1e-8, 1e-4);
       const s10 = clip((((log10(g10v) + 8) / 4) * 255) | 0, 0, 255);
       const s11 = clip((((this.genes[11] - 0.01) / 0.29) * 255) | 0, 0, 255);
-      colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0]);
+      /* gene 12: weight prune threshold (log scale ~1e-3..1e-1) */
+      const g12v = clip(this.genes[12], 1e-3, 1e-1);
+      const s12 = clip((((log10(g12v) + 3) / 2) * 255) | 0, 0, 255);
+      /* gene 13: min contribution score (log scale ~1e-6..1e-2) */
+      const g13v = clip(this.genes[13], 1e-6, 1e-2);
+      const s13 = clip((((log10(g13v) + 6) / 4) * 255) | 0, 0, 255);
+      colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0], [s12, s12, 0], [0, s13, s13]);
       this.colors = colors;
     }
     colorProteins() {
@@ -416,6 +506,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       this.protein_colors[8] = [0, 0, clip(Math.log(Math.abs(gr + EPS) * 55) | 0, 0, 255)];
       this.protein_colors[3] = this.protein_colors[5] = [0, 0, 0];
       this.protein_colors[9] = this.protein_colors[10] = this.protein_colors[11] = [0, 0, 0];
+      this.protein_colors[12] = this.protein_colors[13] = [0, 0, 0];
     }
 
     computeTotalCharge(upper, reach) {
@@ -595,15 +686,24 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       if (dir === 'forward') {
         this.forward_charges.push(nc);
         if (this.forward_charges.length > hm) this.forward_charges.shift();
-        this.max_charge_diff_forward = Math.max(...this.forward_charges) - Math.min(...this.forward_charges);
+        let mn = Infinity, mx = -Infinity;
+        for (let i = 0; i < this.forward_charges.length; i++) {
+          const v = this.forward_charges[i]; if (v < mn) mn = v; if (v > mx) mx = v;
+        }
+        this.max_charge_diff_forward = mx - mn;
         if (this.max_charge_diff_forward > this.genes[7]) this.significant_charge_change_forward = true;
       } else if (dir === 'reverse') {
         this.reverse_charges.push(nc);
         if (this.reverse_charges.length > hm) this.reverse_charges.shift();
-        this.max_charge_diff_reverse = Math.max(...this.reverse_charges) - Math.min(...this.reverse_charges);
+        let mn = Infinity, mx = -Infinity;
+        for (let i = 0; i < this.reverse_charges.length; i++) {
+          const v = this.reverse_charges[i]; if (v < mn) mn = v; if (v > mx) mx = v;
+        }
+        this.max_charge_diff_reverse = mx - mn;
         if (this.max_charge_diff_reverse > this.genes[7]) this.significant_charge_change_reverse = true;
       }
       this.charge = nc;
+      this._recomputeContributionScore();
     }
     updateGradientImportance(ng) {
       const cfg = CellConfig, hm = cfg ? cfg.how_much_training_data : 20;
@@ -612,6 +712,13 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       if (this.gradient_history.length > hm) this.gradient_history.shift();
       this.avg_gradient_magnitude = mean(this.gradient_history);
       if (this.avg_gradient_magnitude > gt) this.significant_gradient_change = true;
+      this._recomputeContributionScore();
+    }
+    /* Contribution score = max(charge variability across directions) × avg gradient.
+       Combines "is this cell active?" with "is it learning?" */
+    _recomputeContributionScore() {
+      const cd = Math.max(this.max_charge_diff_forward, this.max_charge_diff_reverse);
+      this.contributionScore = cd * this.avg_gradient_magnitude;
     }
     resetDirectionalChargeHistory(dir) {
       if (dir === 'forward' || dir === '+++++>>>>>') {
@@ -622,11 +729,13 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         this.significant_charge_change_reverse = false;
       }
       this.gradient_history.length = 0; this.avg_gradient_magnitude = 0; this.significant_gradient_change = false;
+      this.contributionScore = 0;
     }
     resetGradientChange() {
       const cfg = CellConfig;
       this.significant_gradient_change = false; this.gradient_history.length = 0; this.gradient = 0;
       this.error = cfg ? cfg.epsilon : EPS;
+      this.contributionScore = 0;
     }
     remapWeights(reach) {
       const oldM = Math.sqrt(this.weights.length) | 0;
@@ -686,18 +795,30 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       else this.updateWeightsAndBias(up, lrn, reach, wd);
     }
     shouldDie(prune, gp, pl) {
-      if (gp && !this.significant_gradient_change) return true;
-      if (prune) {
-        if (pl === 'AND' && !(this.significant_charge_change_forward && this.significant_charge_change_reverse)) return true;
-        if (pl === 'OR' && !(this.significant_charge_change_forward || this.significant_charge_change_reverse)) return true;
+      const cfg = CellConfig;
+      /* Gradient prune (O key): compare live avg_gradient_magnitude against threshold */
+      if (gp) {
+        const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-7);
+        if (this.avg_gradient_magnitude <= gt) return true;
       }
-      /* Weight-magnitude pruning: if all weights are near zero, the cell passes no information */
-      const wpt = CellConfig ? CellConfig.weight_prune_threshold : 0.01;
+      /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta */
+      if (prune) {
+        const cd = this.genes[7];
+        const fwd = this.max_charge_diff_forward > cd;
+        const rev = this.max_charge_diff_reverse > cd;
+        if (pl === 'AND' && !(fwd && rev)) return true;
+        if (pl === 'OR'  && !(fwd || rev)) return true;
+      }
+      /* Weight-magnitude pruning: gene 12 = per-cell weight prune threshold */
+      const wpt = (cfg && cfg.autonomous_network_genes) ? this.genes[12] : (cfg ? cfg.weight_prune_threshold : 0.01);
       if (prune && wpt > 0) {
         let maxW = 0;
         for (let i = 0; i < this.weights.length; i++) { const aw = Math.abs(this.weights[i]); if (aw > maxW) maxW = aw; }
         if (maxW < wpt) return true;
       }
+      /* Contribution score pruning: gene 13 = per-cell min contribution score */
+      const mcs = (cfg && cfg.autonomous_network_genes) ? this.genes[13] : (cfg ? cfg.min_contribution_score : 0);
+      if (prune && mcs > 0 && this.contributionScore < mcs) return true;
       return false;
     }
     shouldDieGenetic(nAlive, prot) {
@@ -727,6 +848,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         max_charge_diff_forward:this.max_charge_diff_forward,max_charge_diff_reverse:this.max_charge_diff_reverse,
         significant_charge_change_forward:this.significant_charge_change_forward,significant_charge_change_reverse:this.significant_charge_change_reverse,
         gradient_history:this.gradient_history.slice(),avg_gradient_magnitude:this.avg_gradient_magnitude,significant_gradient_change:this.significant_gradient_change,
+        contributionScore:this.contributionScore,
       };
     }
     static fromJSON(j) {
@@ -737,19 +859,25 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       c.max_charge_diff_forward=j.max_charge_diff_forward||0;c.max_charge_diff_reverse=j.max_charge_diff_reverse||0;
       c.significant_charge_change_forward=!!j.significant_charge_change_forward;c.significant_charge_change_reverse=!!j.significant_charge_change_reverse;
       c.gradient_history=(j.gradient_history||[]).slice();c.avg_gradient_magnitude=j.avg_gradient_magnitude||0;c.significant_gradient_change=!!j.significant_gradient_change;
-      c.colors=new Array(12).fill(0);c.protein_colors=new Array(12).fill(0);c.colorGenes();c.colorProteins();
+      c.contributionScore=j.contributionScore||0;
+      /* backward-compat: old saves had 12 genes, pad to 14 with defaults */
+      while (c.genes.length < 14) c.genes.push(c.genes.length === 12 ? 0.01 : 0);
+      c.colors=new Array(14).fill(0);c.protein_colors=new Array(14).fill(0);c.colorGenes();c.colorProteins();
       return c;
     }
     clone() { return Cell.fromJSON(this.toJSON()); }
     toString() {
       let g911 = '';
       if (this.genes.length >= 12) g911 = `  LR=${this.genes[9].toFixed(4)}, GT=${this.genes[10].toExponential(2)}, AS=${this.genes[11].toFixed(2)}\n`;
+      if (this.genes.length >= 14) g911 += `  WPT=${this.genes[12].toExponential(2)}, MCS=${this.genes[13].toExponential(2)}\n`;
       const w = []; for (let i = 0; i < this.weights.length; i++) { if (i && i % 7 === 0) w.push('\n'); w.push(this.weights[i].toFixed(4)); }
       return `Neuron: layer=${this.layer} x=${this.x} y=${this.y}\n` +
         `Genes (breeding):\n  OT=${this.genes[0]}, IT=${this.genes[1]}, BT=${this.genes[2]}, MR=${this.genes[3]}\n` +
         `Genes (network):\n  WG=${this.genes[4]}, BR=${this.genes[5]}, AW=${this.genes[6]}, CD=${this.genes[7].toExponential(4)}, WD=${this.genes[8].toExponential(4)}\n` +
         g911 + `Proteins:\n  charge=${this.charge.toFixed(4)}, error=${this.error.toExponential(4)}, bias=${this.bias.toFixed(4)}, gradient=${this.gradient.toFixed(4)}\n` +
-        `  reach=${this.reach}\nweights=${w.join(', ')}`;
+        `  reach=${this.reach}, avgGrad=${this.avg_gradient_magnitude.toExponential(2)}, contribScore=${this.contributionScore.toExponential(2)}\n` +
+        `  chargeDiffFwd=${this.max_charge_diff_forward.toFixed(4)}, chargeDiffRev=${this.max_charge_diff_reverse.toFixed(4)}\n` +
+        `weights=${w.join(', ')}`;
     }
   }
 
@@ -997,6 +1125,32 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         }
       }
     }
+  }
+
+  /* Percentile pruning: rank all hidden cells by contributionScore, kill bottom N%.
+     Called at epoch boundaries when config.prune_percentile > 0 and pruning is active. */
+  function percentilePrune(state, config) {
+    const pct = config.prune_percentile;
+    if (!pct || pct <= 0) return 0;
+    const nl = config.num_layers;
+    const scored = [];
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z];
+        if (c) scored.push({ x, y, z, score: c.contributionScore });
+      }
+    if (scored.length === 0) return 0;
+    scored.sort((a, b) => a.score - b.score);
+    const cutIdx = Math.max(1, Math.floor(scored.length * pct / 100));
+    const cutoff = scored[Math.min(cutIdx, scored.length - 1)].score;
+    let killed = 0;
+    for (let i = 0; i < cutIdx; i++) {
+      const s = scored[i];
+      state.cells[s.x][s.y][s.z] = null;
+      killed++;
+    }
+    if (killed > 0) state.invalidateNeighborCache();
+    return killed;
   }
 
   function resetAllGradientChanges(state, config) {
@@ -1363,29 +1517,89 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
   }
 
   function getAllSettings(state, config) {
-    return `Current Settings:
-    Num_Layers: ${ config.num_layers}
-    LENGTH_OF_DENDRITE: ${ config.length_of_dendrite}
-    WEIGHT_MATRIX: ${ config.weight_matrix}
-    NUMBER_OF_WEIGHTS: ${ config.number_of_weights}
-    Mutation Rate Per 10,000 Cycles: ${ config.mutation_rate}
-    Lower Allele Range: ${ config.lower_allele_range}
-    Upper Allele Range: ${ config.upper_allele_range}
-    Weight Change Threshold: ${ config.weight_change_threshold}
-    Learning Rate: ${ config.learning_rate}
-    Bias Range: ${ config.bias_range}
-    Avg Weights per Cell: ${ config.avg_weights_cell}
-    Weight Decay: ${ config.weight_decay}
-    Charge Delta: ${ config.charge_delta}
-    Gradient Clip Range: ${ config.gradient_clip_range}
-    Training Data Size: ${ config.how_much_training_data}
-    Gradient minibatch size (K key): ${ config.gradient_minibatch_size}
-    Shuffle Epochs: ${ config.shuffle_epoch}
-    Weight Prune Threshold: ${ config.weight_prune_threshold}
-    Start Index: ${ config.start_index}
-    Display Mode: ${ state.display}
-    Direction of Charge Flow: ${ state.direction_of_charge_flow}
-    Prune Logic: ${ state.prune_logic}`;
+    const sug = suggestParams(state, config);
+    const vs = (cur, sugVal) => sug && sugVal !== undefined ? `${cur}  ← net: ${sugVal}` : `${cur}`;
+    let out = `══════ CURRENT SETTINGS ══════
+ Num Layers:         ${config.num_layers}
+ Dendrite Length:     ${config.length_of_dendrite}  (matrix ${config.weight_matrix}×${config.weight_matrix} = ${config.number_of_weights} weights)
+ Mutation Rate:       ${config.mutation_rate}  (per 10k cycles)
+ Allele Range:        ${config.lower_allele_range} – ${config.upper_allele_range}
+ Weight Chg Thresh:   ${config.weight_change_threshold}
+
+══════ KEY LEARNING PARAMS ══════  (← net = measured suggestion)
+ Learning Rate:       ${vs(config.learning_rate, sug ? sug.lr : undefined)}
+ Bias Range:          ${vs(config.bias_range, sug ? sug.bias_range : undefined)}
+ Avg Weights/Cell:    ${vs(config.avg_weights_cell, sug ? sug.avg_weights_cell : undefined)}
+ Weight Decay:        ${vs(config.weight_decay, sug ? sug.weight_decay : undefined)}
+ Charge Delta:        ${vs(config.charge_delta, sug ? sug.charge_delta : undefined)}
+ Gradient Threshold:  ${vs(config.gradient_threshold, sug ? sug.gradient_threshold : undefined)}
+ Gradient Clip:       ${vs(config.gradient_clip_range, sug ? sug.gradient_clip_range : undefined)}
+ Activation Slope:    ${config.activation_slope}
+ Weight Prune Thresh: ${vs(config.weight_prune_threshold, sug ? sug.weight_prune_threshold : undefined)}  [gene 12]
+ Min Contrib Score:   ${config.min_contribution_score}  (0=off, charge_diff×gradient)  [gene 13]
+ Prune Percentile:    ${config.prune_percentile}%  (0=off, bottom N% killed each epoch)
+
+══════ TRAINING CONFIG ══════
+ Training Data Size:  ${config.how_much_training_data}
+ Minibatch K:         ${config.gradient_minibatch_size}
+ Shuffle Epochs:      ${config.shuffle_epoch}
+ Start Index:         ${config.start_index}
+
+══════ STATE ══════
+ Display:             ${state.display}
+ Charge Flow:         ${state.direction_of_charge_flow}
+ Prune Logic:         ${state.prune_logic}
+ Training:            ${state.training_mode}  Backprop: ${state.back_prop}
+ Prune: ${state.prune}  Grad Prune: ${state.gradient_prune}`;
+    if (sug) {
+      out += `\n\n══════ NETWORK MEASUREMENTS ══════
+ Cells:               ${sug.nCells}
+ Avg Fan-in:          ${sug.avgFanIn.toFixed(1)}
+ Median |gradient|:   ${sug.medGrad.toExponential(2)}
+ Median |weight|:     ${sug.medWeight.toFixed(4)}
+ Median |charge|:     ${sug.medCharge.toFixed(4)}
+ Median |error|:      ${sug.medError.toExponential(2)}
+ Median |bias|:       ${sug.medBias.toFixed(4)}`;
+    }
+    /* Pruning readiness: show how many cells would survive/die at current settings */
+    const nl = config.num_layers;
+    const csScores = [];
+    let wouldDieCharge = 0, wouldDieGrad = 0, wouldDieWeight = 0, wouldDieCS = 0, totalH = 0;
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = state.cells[x][y][z]; if (!c) continue;
+        totalH++;
+        csScores.push(c.contributionScore);
+        const cd = c.genes[7];
+        const fwd = c.max_charge_diff_forward > cd;
+        const rev = c.max_charge_diff_reverse > cd;
+        if (state.prune_logic === 'AND' ? !(fwd && rev) : !(fwd || rev)) wouldDieCharge++;
+        const gt = config.autonomous_network_genes ? c.genes[10] : config.gradient_threshold;
+        if (c.avg_gradient_magnitude <= gt) wouldDieGrad++;
+        let maxW = 0;
+        for (let i = 0; i < c.weights.length; i++) { const aw = Math.abs(c.weights[i]); if (aw > maxW) maxW = aw; }
+        const wpt = config.autonomous_network_genes ? c.genes[12] : config.weight_prune_threshold;
+        if (maxW < wpt) wouldDieWeight++;
+        const mcs = config.autonomous_network_genes ? c.genes[13] : config.min_contribution_score;
+        if (mcs > 0 && c.contributionScore < mcs) wouldDieCS++;
+      }
+    if (totalH > 0) {
+      csScores.sort((a, b) => a - b);
+      const pct = (p) => csScores[Math.min(((p * csScores.length) | 0), csScores.length - 1)];
+      out += `\n\n══════ PRUNING READINESS ══════  (${totalH} hidden cells)
+ Would die (P charge): ${wouldDieCharge}/${totalH}  (${state.prune_logic})
+ Would die (O gradient): ${wouldDieGrad}/${totalH}
+ Would die (weight mag): ${wouldDieWeight}/${totalH}
+ Would die (contrib score): ${wouldDieCS}/${totalH}`;
+      if (config.prune_percentile > 0) {
+        const cutN = Math.max(1, Math.floor(totalH * config.prune_percentile / 100));
+        out += `\n Percentile prune: bottom ${config.prune_percentile}% = ${cutN} cells`;
+      }
+      out += `\n\n Contribution score distribution:
+   p10=${pct(0.10).toExponential(2)}  p25=${pct(0.25).toExponential(2)}  p50=${pct(0.50).toExponential(2)}
+   p75=${pct(0.75).toExponential(2)}  p90=${pct(0.90).toExponential(2)}  max=${pct(1.0).toExponential(2)}`;
+    }
+    return out;
   }
 
   function serializeCells(cells) {
@@ -1424,6 +1638,8 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       gradient_minibatch_size: config.gradient_minibatch_size,
       shuffle_epoch: config.shuffle_epoch,
       weight_prune_threshold: config.weight_prune_threshold,
+      min_contribution_score: config.min_contribution_score,
+      prune_percentile: config.prune_percentile,
       epsilon: config.epsilon,
     };
   }
@@ -1504,6 +1720,62 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     return hsvToRgb(h, s, v);
   }
 
+  const _3D_COLOR_MODE_NAMES = ['Charge', 'Error', 'Gradient', 'Weight Strength', 'Contribution'];
+  const _3D_COLOR_MODE_COUNT = _3D_COLOR_MODE_NAMES.length;
+
+  /* Mode 1: Error — blue (negative) → dark (zero) → red (positive) */
+  function errorColor(cell) {
+    if (!cell) return [0.1, 0.1, 0.1];
+    const e = clip(cell.error, -2, 2);
+    const mag = Math.abs(e) / 2;
+    if (e > 0) return [0.3 + 0.7 * mag, 0.1 * (1 - mag), 0.1 * (1 - mag)];
+    return [0.1 * (1 - mag), 0.1 * (1 - mag), 0.3 + 0.7 * mag];
+  }
+
+  /* Mode 2: Gradient flow — black (dead) → yellow (active learning) */
+  function gradientColor(cell) {
+    if (!cell) return [0.05, 0.05, 0.05];
+    const g = Math.min(Math.abs(cell.gradient), 1);
+    const v = Math.sqrt(g);
+    return [v, v * 0.9, v * 0.1];
+  }
+
+  /* Mode 3: Weight strength — black (weak) → cyan (strong connections) */
+  function weightStrengthColor(cell) {
+    if (!cell || !cell.weights || !cell.weights.length) return [0.08, 0.08, 0.08];
+    let sum = 0;
+    for (let i = 0; i < cell.weights.length; i++) sum += Math.abs(cell.weights[i]);
+    const avg = sum / cell.weights.length;
+    const v = Math.min(avg * 4, 1);
+    return [v * 0.15, v * 0.7 + 0.1, v * 0.9 + 0.1];
+  }
+
+  /* Mode 4: Contribution score — black (dead) → magenta (high contribution).
+     Shows which cells are both active AND learning — the best pruning predictor. */
+  function contributionColor(cell) {
+    if (!cell) return [0.05, 0.05, 0.05];
+    const s = cell.contributionScore;
+    const v = Math.min(Math.sqrt(s * 1000), 1);
+    return [0.3 + 0.7 * v, 0.1 * (1 - v), 0.3 + 0.5 * v];
+  }
+
+  /* Build a small round-disc texture so points render as circles, not squares */
+  function _makeDiscTexture(sz) {
+    const c = document.createElement('canvas');
+    c.width = c.height = sz;
+    const g = c.getContext('2d');
+    const half = sz / 2;
+    const grad = g.createRadialGradient(half, half, 0, half, half, half);
+    grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.7, 'rgba(255,255,255,1)');
+    grad.addColorStop(1.0, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, sz, sz);
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
   function init3d(canvas) {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
@@ -1514,19 +1786,20 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     renderer.setClearColor(0x101018, 1);
     const root = new THREE.Group();
     scene.add(root);
-    const matIn = new THREE.PointsMaterial({ size: 6, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95 });
-    const matH = new THREE.PointsMaterial({ size: 8, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95 });
-    const matO = new THREE.PointsMaterial({ size: 14, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95 });
+    const discMap = _makeDiscTexture(64);
+    const matIn = new THREE.PointsMaterial({ size: 0.35, map: discMap, vertexColors: true, sizeAttenuation: true, transparent: true, alphaTest: 0.05, depthWrite: false });
+    const matH  = new THREE.PointsMaterial({ size: 0.45, map: discMap, vertexColors: true, sizeAttenuation: true, transparent: true, alphaTest: 0.05, depthWrite: false });
+    const matO  = new THREE.PointsMaterial({ size: 0.7,  map: discMap, vertexColors: true, sizeAttenuation: true, transparent: true, alphaTest: 0.05, depthWrite: false });
     const ptsIn = new THREE.Points(new THREE.BufferGeometry(), matIn);
     const ptsHid = new THREE.Points(new THREE.BufferGeometry(), matH);
     const ptsOut = new THREE.Points(new THREE.BufferGeometry(), matO);
     root.add(ptsIn); root.add(ptsHid); root.add(ptsOut);
-    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 });
+    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7 });
     const lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMat);
     root.add(lines);
     const backpropGroup = new THREE.Group();
     root.add(backpropGroup);
-    g3 = { scene, camera, renderer, root, ptsIn, ptsHid, ptsOut, lines, cellRefs: [], nIn: 0, nHid: 0, nOut: 0, backpropGroup };
+    g3 = { scene, camera, renderer, root, ptsIn, ptsHid, ptsOut, lines, discMap, cellRefs: [], nIn: 0, nHid: 0, nOut: 0, backpropGroup };
   }
 
   function rebuild3dCache(state, config) {
@@ -1575,7 +1848,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
           if (wi >= cell.weights.length) continue;
           const w = cell.weights[wi];
           if (Math.abs(w) < WEIGHT_DRAW_THRESHOLD) continue;
-          const inten = Math.min(Math.abs(w), 1);
+          const inten = Math.max(0.25, Math.min(Math.abs(w), 1));
           const npx = nx - halfW, npy = ny - halfH;
           connPos.push(px, py, pz, npx, npy, prevZ);
           if (w > 0) connCol.push(0, inten, 0, 0, inten, 0);
@@ -1637,10 +1910,22 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     state._3d_dirty = false;
   }
 
+  function _cellColorForMode(cell, layer, nl, mode) {
+    if (!cell) return [0.1, 0.1, 0.1];
+    switch (mode) {
+      case 1: return errorColor(cell);
+      case 2: return gradientColor(cell);
+      case 3: return weightStrengthColor(cell);
+      case 4: return contributionColor(cell);
+      default: return layerColor(layer, nl, cell.charge);
+    }
+  }
+
   function refresh3dColors(state, config) {
     const refs = g3.cellRefs;
     if (!refs.length) return;
     const nl = config.num_layers;
+    const mode = state._3d_color_mode;
     const geoms = [g3.ptsIn.geometry, g3.ptsHid.geometry, g3.ptsOut.geometry];
     const starts = [0, g3.nIn, g3.nIn + g3.nHid];
     const counts = [g3.nIn, g3.nHid, g3.nOut];
@@ -1655,7 +1940,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         if (!ref) continue;
         const [x, y, z] = ref;
         const cell = state.cells[x][y][z];
-        const [r, gr, b] = cell ? layerColor(z, nl, cell.charge) : [0.1, 0.1, 0.1];
+        const [r, gr, b] = _cellColorForMode(cell, z, nl, mode);
         arr[off] = r; arr[off + 1] = gr; arr[off + 2] = b; off += 3;
       }
       attr.needsUpdate = true;
@@ -1677,10 +1962,10 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
     const hud = document.getElementById('hud3d');
     hud.style.display = 'block';
     hud.textContent = [
-      `Layers: ${config.num_layers} | Cells: ${g3.nIn + g3.nHid + g3.nOut}`,
-      `Cycle: ${state.training_cycles} | Correct: ${state.bingo_count}/${config.how_much_training_data}`,
-      `Loss: ${state.running_avg_loss.toFixed(4)} | Max: ${state.max_bingo_count}`,
-      `LR: ${config.learning_rate} | Dendrite: ${config.length_of_dendrite} | BackProp: ${state.back_prop}`,
+      `Layers: ${config.num_layers} | Cells: ${g3.nIn + g3.nHid + g3.nOut} | Color: ${_3D_COLOR_MODE_NAMES[state._3d_color_mode]} (G=cycle)`,
+      `Epoch: ${state.training_cycles} | Correct: ${state.bingo_count}/${config.how_much_training_data} | Max: ${state.max_bingo_count}`,
+      `Loss: ${state.running_avg_loss.toFixed(4)} | LR: ${config.learning_rate} | Dendrite: ${config.length_of_dendrite}`,
+      `Train: ${state.training_mode} | BackProp: ${state.back_prop} | Prune: ${state.prune}`,
     ].join('\n');
   }
 
@@ -1699,32 +1984,45 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-      const m = new THREE.PointsMaterial({ size, vertexColors: true, sizeAttenuation: true, depthTest: true });
+      const m = new THREE.PointsMaterial({ size: size * 0.06, map: g3.discMap, vertexColors: true, sizeAttenuation: true, transparent: true, alphaTest: 0.05, depthWrite: false });
       g3.backpropGroup.add(new THREE.Points(g, m));
     };
-    const addLines = (seg) => {
+    const addLines = (seg, cols) => {
       if (!seg.length) return;
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
-      g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(seg.length / 3).fill(1), 3));
-      const m = new THREE.LineBasicMaterial({ vertexColors: true });
+      g.setAttribute('color', new THREE.Float32BufferAttribute(cols || new Float32Array(seg.length / 3).fill(1), 3));
+      const m = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 });
       g3.backpropGroup.add(new THREE.LineSegments(g, m));
     };
     const pHi = [], cHi = [];
     pHi.push(px, py, z); cHi.push(1, 1, 0);
     const reach = config.autonomous_network_genes ? cell.reach : config.length_of_dendrite;
+    const wm = config.autonomous_network_genes ? (Math.sqrt(cell.genes[4]) | 0) : config.weight_matrix;
+    const lineSegs = [], lineCols = [];
     if (cz > 0) {
+      const prevZz = (cz - 1) * 2 - nl;
       for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
         const nx = cx + dx, ny = cy + dy;
         if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) continue;
         const u = state.cells[nx][ny][cz - 1]; if (!u) continue;
         const ci = Math.min(Math.abs(u.charge), 1);
-        const zz = (cz - 1) * 2 - nl;
-        pHi.push(nx - halfW, ny - halfH, zz);
+        const npx = nx - halfW, npy = ny - halfH;
+        pHi.push(npx, npy, prevZz);
         cHi.push(0.2, 0.5 + 0.5 * ci, 1);
+        /* Draw dendrite line from current cell to this predecessor, colored by weight sign */
+        const wi = (dx + reach) * wm + (dy + reach);
+        if (wi < cell.weights.length) {
+          const w = cell.weights[wi];
+          const inten = Math.max(0.3, Math.min(Math.abs(w), 1));
+          lineSegs.push(px, py, z, npx, npy, prevZz);
+          if (w > 0) lineCols.push(0, inten, 0.4, 0, inten, 0.4);
+          else lineCols.push(inten, 0, 0.4, inten, 0, 0.4);
+        }
       }
     }
     addPoints(pHi, cHi, 10);
+    if (lineSegs.length) addLines(lineSegs, lineCols);
     g3.renderer.render(g3.scene, g3.camera);
   }
 
@@ -2015,15 +2313,28 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       if (k.toLowerCase() === 'o') { state.gradient_prune = !state.gradient_prune; return; }
       if (k === '=' || k === '+') { state.prune_logic = state.prune_logic === 'AND' ? 'OR' : 'AND'; return; }
       if (k.toLowerCase() === 'c' && !state.show_3d_view && state.charge_change_protection) {
-        const a = await showModal(`Charge delta (${config.charge_delta}):`, config.charge_delta);
-        const b = await showModal(`Gradient threshold (${config.gradient_threshold}):`, config.gradient_threshold);
+        const sug = suggestParams(state, config);
+        const hint = sug ? ` [suggested: ${sug.charge_delta}]` : '';
+        const hintG = sug ? ` [suggested: ${sug.gradient_threshold}]` : '';
+        const a = await showModal(`Charge delta (current: ${config.charge_delta})${hint}:`, sug ? sug.charge_delta : config.charge_delta);
+        const b = await showModal(`Gradient threshold (current: ${config.gradient_threshold})${hintG}:`, sug ? sug.gradient_threshold : config.gradient_threshold);
         if (a != null && !Number.isNaN(+a)) config.charge_delta = +a;
         if (b != null && !Number.isNaN(+b)) config.gradient_threshold = +b;
+        /* Contribution score threshold (Strategy 2) */
+        const medCS = sug ? (sug.medGrad * Math.max(sug.medCharge, 0.001)) : 0;
+        const hintCS = sug ? ` [median contribution: ${medCS.toExponential(2)}]` : '';
+        const cs = await showModal(`Min contribution score (charge_diff×gradient, 0=off, current: ${config.min_contribution_score})${hintCS}:`, config.min_contribution_score);
+        if (cs != null && !Number.isNaN(+cs)) config.min_contribution_score = Math.max(0, +cs);
+        /* Percentile pruning (Strategy 3) */
+        const pp = await showModal(`Prune bottom N% by contribution score each epoch (0=off, e.g. 10, current: ${config.prune_percentile}):`, config.prune_percentile);
+        if (pp != null && !Number.isNaN(+pp)) config.prune_percentile = clip(+pp, 0, 50);
         return;
       }
       if (k.toLowerCase() === 'd') { state.display_updating = !state.display_updating; return; }
       if (k.toLowerCase() === 'i') {
-        const v = await showModal(`Learning rate (${config.learning_rate}):`, config.learning_rate);
+        const sug = suggestParams(state, config);
+        const hint = sug ? ` [suggested: ${sug.lr} based on fan-in ${sug.avgFanIn.toFixed(1)}]` : '';
+        const v = await showModal(`Learning rate (current: ${config.learning_rate})${hint}:`, sug ? sug.lr : config.learning_rate);
         if (v != null && !Number.isNaN(+v)) config.learning_rate = +v;
         return;
       }
@@ -2043,6 +2354,11 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       if (k.toLowerCase() === 'b') { state.back_prop = !state.back_prop; return; }
       if (k.toLowerCase() === 'a') { state.andromida_mode = !state.andromida_mode; return; }
       if (k.toLowerCase() === 'w') { resetAllGradientChanges(state, config); return; }
+      if (k.toLowerCase() === 'g' && state.show_3d_view) {
+        state._3d_color_mode = (state._3d_color_mode + 1) % _3D_COLOR_MODE_COUNT;
+        uiPrint('3D color: ' + _3D_COLOR_MODE_NAMES[state._3d_color_mode]);
+        return;
+      }
       if (k.toLowerCase() === 'g' && !state.show_3d_view) { state.display = state.display === 'genes' ? 'proteins' : 'genes'; return; }
       if (k.toLowerCase() === 'q' && !state.show_3d_view) { updateStatsPane(formatTelemetry(computeTelemetry(state, config))); return; }
       if (k === '3') {
@@ -2188,6 +2504,11 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       }
       if (k.toLowerCase() === 'e') {
         const oldNumWeights = config.number_of_weights;
+        const sug = suggestParams(state, config);
+        const s = (label, cur, sugVal) => {
+          const hint = sug && sugVal !== undefined ? ` [net suggests: ${sugVal}]` : '';
+          return `${label} (current: ${cur})${hint}:`;
+        };
         const nl = await showModal(`num_layers (4-16):`, config.num_layers);
         const ld = await showModal(`dendrite length:`, config.length_of_dendrite);
         if (nl != null) config.num_layers = clip(+nl | 0, 4, 16);
@@ -2196,13 +2517,13 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
         config.lower_allele_range = +(await showModal('lower_allele:', config.lower_allele_range) ?? config.lower_allele_range);
         config.upper_allele_range = +(await showModal('upper_allele:', config.upper_allele_range) ?? config.upper_allele_range);
         config.weight_change_threshold = +(await showModal('weight_change_threshold:', config.weight_change_threshold) ?? config.weight_change_threshold);
-        config.avg_weights_cell = +(await showModal('avg_weights_cell:', config.avg_weights_cell) ?? config.avg_weights_cell);
-        config.weight_decay = +(await showModal('weight_decay:', config.weight_decay) ?? config.weight_decay);
-        config.bias_range = +(await showModal('bias_range:', config.bias_range) ?? config.bias_range);
-        config.learning_rate = +(await showModal('learning_rate:', config.learning_rate) ?? config.learning_rate);
-        config.charge_delta = +(await showModal('charge_delta:', config.charge_delta) ?? config.charge_delta);
-        config.gradient_threshold = +(await showModal('gradient_threshold:', config.gradient_threshold) ?? config.gradient_threshold);
-        config.activation_slope = +(await showModal('activation_slope:', config.activation_slope) ?? config.activation_slope);
+        config.avg_weights_cell = +(await showModal(s('avg_weights_cell', config.avg_weights_cell, sug ? sug.avg_weights_cell : undefined), sug ? sug.avg_weights_cell : config.avg_weights_cell) ?? config.avg_weights_cell);
+        config.weight_decay = +(await showModal(s('weight_decay', config.weight_decay, sug ? sug.weight_decay : undefined), sug ? sug.weight_decay : config.weight_decay) ?? config.weight_decay);
+        config.bias_range = +(await showModal(s('bias_range', config.bias_range, sug ? sug.bias_range : undefined), sug ? sug.bias_range : config.bias_range) ?? config.bias_range);
+        config.learning_rate = +(await showModal(s('learning_rate', config.learning_rate, sug ? sug.lr : undefined), sug ? sug.lr : config.learning_rate) ?? config.learning_rate);
+        config.charge_delta = +(await showModal(s('charge_delta', config.charge_delta, sug ? sug.charge_delta : undefined), sug ? sug.charge_delta : config.charge_delta) ?? config.charge_delta);
+        config.gradient_threshold = +(await showModal(s('gradient_threshold', config.gradient_threshold, sug ? sug.gradient_threshold : undefined), sug ? sug.gradient_threshold : config.gradient_threshold) ?? config.gradient_threshold);
+        config.activation_slope = +(await showModal(s('activation_slope', config.activation_slope, sug ? sug.activation_slope : undefined), config.activation_slope) ?? config.activation_slope);
         config.updateDerived();
         /* Desktop neurosim/main.py: remap only when weight count (dendrite footprint) changes. */
         if (config.number_of_weights !== oldNumWeights) {
@@ -2224,8 +2545,14 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
       }
       if (k.toLowerCase() === 'x') {
         /* Auto-compute avg_weights_cell from actual fan-in before re-init for proper He scaling */
-        const measuredFanIn = computeAvgFanIn(state, config);
-        config.avg_weights_cell = Math.max(1, Math.round(measuredFanIn));
+        const sug = suggestParams(state, config);
+        if (sug) {
+          config.avg_weights_cell = sug.avg_weights_cell;
+          config.bias_range = sug.bias_range;
+        } else {
+          const measuredFanIn = computeAvgFanIn(state, config);
+          config.avg_weights_cell = Math.max(1, Math.round(measuredFanIn));
+        }
         for (let z = 1; z < config.num_layers - 1; z++)
           for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
             const c = state.cells[x][y][z];
@@ -2236,7 +2563,7 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             }
           }
         state.not_saved_yet = true; state.reset_training_metrics();
-        uiPrint(`Randomized weights. avg_weights_cell auto-set to ${config.avg_weights_cell} (measured fan-in: ${measuredFanIn.toFixed(1)})`);
+        uiPrint(`Reset weights+bias. fan-in=${config.avg_weights_cell}, bias_range=${config.bias_range}, He scale=√(2/${config.avg_weights_cell})=${Math.sqrt(2/config.avg_weights_cell).toFixed(3)}`);
         return;
       }
       if (k.toLowerCase() === 'n') {
@@ -2337,6 +2664,11 @@ const HELP_SCREEN = {"jmr_defs": "The function of each gene:\n\n    Overcrowding
             const ba = state._batch_loss_sum / Math.max(1, state._batch_sample_count);
             predictionPlotEpoch(state, predBatch, ba);
             state._training_sample_i = 0;
+            /* Epoch-boundary percentile pruning (competitive / trophic factor) */
+            if (config.prune_percentile > 0 && (state.prune || state.gradient_prune)) {
+              const killed = percentilePrune(state, config);
+              if (killed > 0) { uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`); state._3d_dirty = true; }
+            }
             if (state.show_training_stats && state.training_cycles % state.stats_update_frequency === 0) {
               updateTrainingStats(state, config);
               updateStatsPane(formatTrainingStats(state));
