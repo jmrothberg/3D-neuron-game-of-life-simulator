@@ -79,24 +79,14 @@ So: **alleles supply architecture, initial scales, update rules, and threshold l
 
 Together, **weights** and **bias** are where the network's **learned mapping** actually lives. **backprops_remaining** protects newborn cells until they've had enough training cycles to integrate.
 
-**Integrative memory proteins** (rolling statistics — carry "compressed history of recent activity"):
+**Integrative memory proteins** (7 rolling statistics — carry "compressed history of recent activity"):
 
-These proteins are built from the **trajectories of charge and gradient** over time. Think of them as activity-dependent modifications: the cell watches its own fast proteins and builds slow summaries. All pruning decisions read from them.
-
-| Protein | What it tracks | How it's updated | Used by |
-|---------|---------------|-----------------|---------|
-| **max_charge_diff_forward** | Max charge swing across forward-pass samples | Each forward pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
-| **max_charge_diff_reverse** | Max charge swing across reverse-pass samples | Each reverse pass: push charge, track running max − min | Activity pruning (P key), contribution score |
-| **avg_gradient_magnitude** | Rolling average of \|gradient\| over recent samples | Each backward pass: push \|gradient\| to history window, compute mean | Gradient pruning (O key), contribution score |
-| **contributionScore** | Combined activity + learning signal | `max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (Z key), percentile pruning, 3D color mode |
-| **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set `true` when `max_charge_diff_forward > threshold`, never cleared | Conway death protection only |
-| **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only |
-| **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set `true` when `avg_gradient_magnitude > threshold`, never cleared | Conway death protection only |
+Built from charge and gradient trajectories over time. The cell watches its own fast proteins and builds slow summaries. All pruning decisions read from these. See the full table in **The 13 Proteins → Integrative Memory** section below.
 
 **Summary:** Fast proteins carry what is happening now. Long-term proteins carry what was learned. Integrative proteins carry compressed history for pruning. ALL memory lives in proteins — there is no separate "memory field" concept.
 ---
 
-### The 14 Genes
+### The 15 Genes
 
 **Genes are fixed after a cell is created.** They do not change during training or backprop.
 
@@ -263,17 +253,9 @@ Genes and proteins create a two-timescale system:
 |-----------|-------------|-----------|
 | **Per-sample** (fast) | Proteins: charge, error, weights, bias, gradient | Forward/backward pass, gradient descent |
 | **Per-sample** (fast) | Integrative memory proteins: rolling charge diffs, gradient history, contribution score | Updated inside `updateCharge()` and `updateGradientImportance()` |
-| **Per-generation** (slow) | Genes 0–13 | Crossover, mutation, natural selection |
+| **Per-generation** (slow) | Genes 0–14 | Crossover, mutation, natural selection |
 
-- Gene 4 determines *how many* weights a cell has → Proteins (weights) fill that array and are trained
-- Gene 7 determines the *threshold* for significant activity → Integrative protein (charge diffs) is measured against it
-- Gene 8 determines *how fast* weights decay → Protein (weights) shrink by that factor each update
-- Gene 9 determines *how fast* the cell learns → Protein (weights) update at that rate
-- Gene 10 determines the *gradient survival threshold* → Integrative protein (avg_gradient_magnitude) is compared against it
-- Gene 11 determines the *response curve* → Protein (charge) passes through that activation function
-- Gene 12 determines *weight-magnitude pruning sensitivity* → Protein (max \|weight\|) is compared against it
-- Gene 13 determines *contribution-score pruning sensitivity* → Integrative protein (contributionScore) is compared against it
-- Genes 0–2 determine *who lives and dies* → The population of cells is shaped by these rules
+See the **Gene → Protein Map** above for exactly which genes create, control, or threshold which proteins.
 
 ---
 
@@ -322,9 +304,9 @@ Offspring inherit genes via crossover from two parents + mutation. This creates 
 
 ---
 
-## Pruning: Five Complementary Strategies
+## Pruning: Four Cell-Autonomous Strategies + One Global
 
-Pruning removes cells that don't contribute, mimicking synaptic pruning during brain development. The simulator implements five strategies that can be combined:
+Pruning removes cells that don't contribute, mimicking synaptic pruning during brain development. The simulator implements four cell-autonomous strategies (each cell carries its own threshold gene) plus one optional global strategy (off by default):
 
 ### Strategy 1: Charge-Delta Pruning — key P
 
@@ -345,9 +327,9 @@ Cells whose maximum absolute weight falls below their weight prune threshold are
 
 Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses integrative protein (`contributionScore`) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
 
-### Strategy 5: Percentile Pruning (automatic at epoch boundary)
+### Strategy 5: Percentile Pruning (off by default, not cell-autonomous)
 
-At the end of each epoch, the bottom N% of cells (ranked by contribution score) are killed. Configured via `prune_percentile` (0 = off, set via **C** key). Unlike strategies 1–4 which use per-cell thresholds, this is a relative/competitive mechanism: cells must outperform their peers to survive.
+At the end of each epoch, the bottom N% of cells (ranked by contribution score) are killed. Configured via `prune_percentile` (default **0 = off**, set via **C** key). **This is the only non-autonomous pruning strategy** — it ranks all cells globally and kills the weakest regardless of their individual gene thresholds. A cell cannot carry a gene for "what percentile am I in" because that depends on every other cell. Use strategies 1–4 for cell-autonomous pruning.
 
 ### When Pruning Happens: The Winter Model
 
@@ -378,7 +360,7 @@ Andromida Game-of-Life dynamics (birth, death by overcrowding/isolation, mutatio
 
 ### Phase 1: Growth (Andromida Mode)
 
-Starting from a sparse grid, cells reproduce according to their birth genes. A cell is born at an empty location if its parent-derived gene 2 matches the local neighbor count. Offspring inherit all 14 genes from two parents via crossover, with germline mutation controlled by gene 3 (probability = MR/1000).
+Starting from a sparse grid, cells reproduce according to their birth genes. A cell is born at an empty location if its parent-derived gene 2 matches the local neighbor count. Offspring inherit all 15 genes from two parents via crossover, with germline mutation controlled by gene 3 (probability = MR/1000).
 
 ### Phase 2: Learning (Training Mode)
 
@@ -639,11 +621,11 @@ All screens include footnotes explaining when metrics are measured (snapshot vs 
 |---------|---------|
 | **Full neural-network training** | Forward pass, backpropagation, weight/bias updates, cross-entropy loss |
 | **15 heritable genes** | All 15 genes (breeding, network, learning, pruning, immunity) with autonomous/non-autonomous modes |
-| **5 pruning strategies + immunity** | Charge-delta (**P**), gradient (**O**), weight-magnitude (**Y**), contribution-score (**Z**), and percentile (auto) — thresholds via **C** key. Gene 14 gives newborn cells a grace period. |
+| **4 cell-autonomous pruning + immunity** | Charge-delta (**P**), gradient (**O**), weight-magnitude (**Y**), contribution-score (**Z**) — each uses per-cell gene thresholds. Percentile pruning (global, off by default) via **C** key. Gene 14 gives newborn cells a grace period. All pruning runs at epoch boundaries ("winter"). |
 | **Epoch-based training loop** | One epoch = one full pass over all loaded samples; epochs are counted and displayed in the status bar |
 | **Minibatch gradient accumulation** | Configurable batch size **K** (key **K**); gradients accumulate over K samples before one weight update |
 | **Epoch shuffling** | Training samples are Fisher-Yates shuffled at the start of each epoch |
-| **Dual loss plots** | Separate scrolling plots for per-minibatch loss (blue) and per-epoch loss (green), each with an independent Y-axis scale slider (0.1–20) |
+| **Dual loss plots** | Separate scrolling plots for per-minibatch loss (blue) and per-epoch loss (green), each with an independent Y-axis scale slider (0.1–30) |
 | **He initialization** | Weight reset (**X** key) measures average effective fan-in and scales as `randn × √(2/fan_in)` |
 | **Smart defaults with suggestions** | `suggestParams()` scans the network and suggests LR, bias range, weight decay, pruning thresholds. Shown in **E**, **I**, **C** dialogs and **V** screen |
 | **Save / Load** | **S** exports full network state as JSON; **L** imports it; auto-downloads a snapshot when accuracy hits 100% |

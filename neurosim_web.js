@@ -1566,7 +1566,7 @@
  Activation Slope:    ${config.activation_slope}
  Weight Prune Thresh: ${vs(config.weight_prune_threshold, sug ? sug.weight_prune_threshold : undefined)}  [gene 12]
  Min Contrib Score:   ${config.min_contribution_score}  (0=off, charge_diff×gradient)  [gene 13]
- Immune Period:       ${config.immune_period} backprops  (newborn protection)  [gene 14]
+ Immune Period:       ${config.immune_period} training cycles  (newborn protection)  [gene 14]
  Prune Percentile:    ${config.prune_percentile}%  (0=off, bottom N% killed each epoch)
 
 ══════ TRAINING CONFIG ══════
@@ -1655,8 +1655,9 @@
   cycles (protein: backprops_remaining counts down
   each forward pass). Late-born cells survive their
   first winter on immune reserves.
-  Ranks all cells by contributionScore and kills
-  the bottom N%. Set via C key.`;
+² Percentile pruning (off by default, not cell-
+  autonomous): ranks all cells by contributionScore,
+  kills bottom N%. Set via C key (0 = off).`;
     return out;
   }
 
