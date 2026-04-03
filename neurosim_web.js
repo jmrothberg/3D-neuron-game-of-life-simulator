@@ -1017,6 +1017,25 @@
     return o;
   }
 
+  /* Epoch-boundary threshold pruning (P/O/Y/Z): the "winter" cull.
+     Runs once per epoch so every cell gets a full epoch of training before judgment.
+     Cells still protected by gene 14 immune period survive regardless. */
+  function pruneNetwork(state, config) {
+    const nl = config.num_layers, cells = state.cells;
+    let killed = 0;
+    for (let z = 1; z < nl - 1; z++)
+      for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
+        const c = cells[x][y][z];
+        if (c && c.shouldDie(state.prune, state.gradient_prune, state.weight_mag_prune, state.contrib_score_prune, state.prune_logic)) {
+          cells[x][y][z] = null; killed++;
+        }
+      }
+    if (killed) { state.invalidateNeighborCache(); state._3d_dirty = true; }
+    return killed;
+  }
+
+  /* Per-frame evolution: Andromida Game-of-Life dynamics + germline mutation.
+     Threshold pruning (P/O/Y/Z) moved to epoch boundaries — see pruneNetwork(). */
   function updateCells(state, config) {
     const start = 1, stop = config.num_layers - 1;
     const cells = state.cells;
@@ -1024,12 +1043,6 @@
     for (let z = start; z < stop; z++) {
       const neighOfs = buildNeighborOffsets(z, config.num_layers);
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
-        if (cells[x][y][z]) {
-          const cell = cells[x][y][z];
-          if (cell.shouldDie(state.prune, state.gradient_prune, state.weight_mag_prune, state.contrib_score_prune, state.prune_logic)) {
-            cells[x][y][z] = null; gridTopoChanged = true; state.invalidateNeighborCache(); continue;
-          }
-        }
         if (cells[x][y][z]) {
           const cell = cells[x][y][z];
           if (Math.random() < cell.genes[3] / 100000) {
@@ -1635,13 +1648,13 @@
    • avg_gradient = mean |gradient| over last
      N samples
    • contributionScore = charge_diff × avg_grad
-  P/O/Y/Z pruning checks these rolling values each
-  evolution step. Cells only die after they've
-  been consistently inactive across many samples.
+  All pruning (P/O/Y/Z + percentile) runs at EPOCH
+  BOUNDARY only — the "winter" cull. Every cell gets
+  a full epoch of training before being judged.
   Newborn cells are IMMUNE for gene 14 training
   cycles (protein: backprops_remaining counts down
-  each forward pass, not just backprop).
-² Percentile pruning runs once at EPOCH BOUNDARY.
+  each forward pass). Late-born cells survive their
+  first winter on immune reserves.
   Ranks all cells by contributionScore and kills
   the bottom N%. Set via C key.`;
     return out;
@@ -2806,8 +2819,17 @@
             const ba = state._batch_loss_sum / Math.max(1, state._batch_sample_count);
             predictionPlotEpoch(state, predBatch, ba);
             state._training_sample_i = 0;
-            /* Epoch-boundary percentile pruning (competitive / trophic factor) */
-            if (config.prune_percentile > 0 && (state.prune || state.gradient_prune || state.weight_mag_prune || state.contrib_score_prune)) {
+            /* ── Epoch-boundary pruning ("winter") ──
+               All threshold pruning (P/O/Y/Z) runs here so every cell gets a full
+               epoch of training before being judged.  Immune cells (gene 14)
+               survive regardless — like a fawn born in November on stored reserves. */
+            const pAnyOn = state.prune || state.gradient_prune || state.weight_mag_prune || state.contrib_score_prune;
+            if (pAnyOn) {
+              const killed = pruneNetwork(state, config);
+              if (killed > 0) uiPrint(`Epoch ${state.training_cycles}: winter pruned ${killed} cells (P/O/Y/Z thresholds)`);
+            }
+            /* Percentile pruning (competitive / trophic factor) */
+            if (config.prune_percentile > 0 && pAnyOn) {
               const killed = percentilePrune(state, config);
               if (killed > 0) uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`);
             }

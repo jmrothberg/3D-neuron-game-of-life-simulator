@@ -349,17 +349,28 @@ Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gr
 
 At the end of each epoch, the bottom N% of cells (ranked by contribution score) are killed. Configured via `prune_percentile` (0 = off, set via **C** key). Unlike strategies 1–4 which use per-cell thresholds, this is a relative/competitive mechanism: cells must outperform their peers to survive.
 
+### When Pruning Happens: The Winter Model
+
+All five pruning strategies run **once per epoch boundary** — not continuously. Think of each epoch as a growing season: cells are born, train on every sample, accumulate gradient and charge-difference metrics over the full epoch, and then face a single "winter" cull at the end.
+
+This design has three benefits:
+1. **Fair evaluation** — every cell gets a complete epoch of training before being judged, regardless of when it was born.
+2. **Immune period still matters** — a cell born at sample 999 of 1000 has only 1 training cycle before winter. Gene 14 (immune period) protects it across epoch boundaries, ensuring a minimum development time. Like a fawn born in November — it needs to survive its first winter on stored reserves before it can be fairly evaluated.
+3. **No stale-gradient kills** — pruning never runs when training is off, so cells can't die based on frozen metrics.
+
+Andromida Game-of-Life dynamics (birth, death by overcrowding/isolation, mutation) still run every frame when `Run=true` — only threshold pruning (P/O/Y/Z) is epoch-gated.
+
 ### Pruning Summary Table
 
 | Strategy | Key | What's Compared | Threshold Source | When Checked | Biological Analogy |
 |----------|-----|----------------|-----------------|--------------|-------------------|
-| Charge-delta | **P** | `max_charge_diff_*` | Gene 7 / config | Every evolution step | Activity-dependent survival |
-| Gradient | **O** | `avg_gradient_magnitude` | Gene 10 / config | Every evolution step | Neurotrophic factor requirement |
-| Weight-magnitude | **Y** | `max(\|weight\|)` | Gene 12 / config | Every evolution step | Synaptic maintenance threshold |
-| Contribution score | **Z** | `contributionScore` | Gene 13 / config | Every evolution step | Combined activity + learning |
-| Percentile | auto | Rank of `contributionScore` | Config `prune_percentile` | Once per epoch boundary | Competitive survival pressure |
+| Charge-delta | **P** | `max_charge_diff_*` | Gene 7 / config | Epoch boundary | Activity-dependent survival |
+| Gradient | **O** | `avg_gradient_magnitude` | Gene 10 / config | Epoch boundary | Neurotrophic factor requirement |
+| Weight-magnitude | **Y** | `max(\|weight\|)` | Gene 12 / config | Epoch boundary | Synaptic maintenance threshold |
+| Contribution score | **Z** | `contributionScore` | Gene 13 / config | Epoch boundary | Combined activity + learning |
+| Percentile | auto | Rank of `contributionScore` | Config `prune_percentile` | Epoch boundary | Competitive survival pressure |
 
-**Note:** "Every evolution step" means pruning conditions are checked continuously. However, the metrics being checked (`max_charge_diff`, `avg_gradient_magnitude`) are rolling averages over an epoch-worth of samples, so a cell must be consistently inactive over many samples to fail.
+**Epoch = growing season, epoch boundary = winter.** Cells accumulate rolling metrics (charge diffs, gradient magnitudes, contribution scores) over the full epoch. At the boundary, every non-immune cell faces the threshold checks. Failing any active strategy (P, O, Y, or Z) is fatal. Immune cells (gene 14, `backprops_remaining > 0`) survive regardless — seasons don't care when you're born, but the immune period ensures late-born cells get a minimum development time before their first winter.
 
 ---
 
