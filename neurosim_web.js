@@ -122,8 +122,8 @@
       shuffle_epoch: true,
       /* Prune cells where max |weight| < this threshold (weight-magnitude pruning via O key combo) */
       weight_prune_threshold: 0.01,
-      /* Contribution-score threshold: cells with score < this die (0 = off). Score = charge_diff × gradient. */
-      min_contribution_score: 0,
+      /* Contribution-score threshold: cells with score < this die. Score = gradient × (1 + charge_diff). */
+      min_contribution_score: 1e-5,
       /* Percentile pruning: kill bottom N% of cells by contribution score each epoch (0 = off, e.g. 10 = bottom 10%) */
       prune_percentile: 0,
       /* Immune period: number of training cycles (forward passes) a newborn cell survives before becoming prunable (gene 14) */
@@ -641,11 +641,16 @@
       if (this.avg_gradient_magnitude > gt) this.significant_gradient_change = true;
       this._recomputeContributionScore();
     }
-    /* Contribution score = max(charge variability across directions) × avg gradient.
-       Combines "is this cell active?" with "is it learning?" */
+    /* Contribution score: gradient is the baseline ("is this cell learning?"),
+       charge variability is a bonus multiplier ("is it also active?").
+       Formula: gradient × (1 + charge_diff).  When charge_diff=0, score=gradient
+       (same as O pruning).  When charge_diff>0, the cell gets credit for both
+       learning AND producing varied activations.  This fixes the zero-product
+       problem where charge_diff≈0 early in training killed cells that were
+       actively learning (strong gradient but immature forward activations). */
     _recomputeContributionScore() {
       const cd = Math.max(this.max_charge_diff_forward, this.max_charge_diff_reverse);
-      this.contributionScore = cd * this.avg_gradient_magnitude;
+      this.contributionScore = this.avg_gradient_magnitude * (1 + cd);
     }
     resetDirectionalChargeHistory(dir) {
       if (dir === 'forward' || dir === '+++++>>>>>') {
@@ -1539,7 +1544,8 @@
     s.push('   epoch-worth of samples (window = training set)');
     s.push(' • avg_gradient_magnitude = mean |grad| over');
     s.push('   last epoch-worth of samples');
-    s.push(' • contributionScore = charge_diff × avg_grad');
+    s.push(' • contributionScore = avg_grad × (1 + charge_diff)');
+    s.push('    (gradient baseline + charge activity bonus)');
     s.push('These rolling values are what pruning checks.');
     s.push('See V screen 0 for pruning readiness details.');
     return s.join('\n');
@@ -1565,7 +1571,7 @@
  Gradient Clip:       ${vs(config.gradient_clip_range, sug ? sug.gradient_clip_range : undefined)}
  Activation Slope:    ${config.activation_slope}
  Weight Prune Thresh: ${vs(config.weight_prune_threshold, sug ? sug.weight_prune_threshold : undefined)}  [gene 12]
- Min Contrib Score:   ${config.min_contribution_score}  (0=off, charge_diff×gradient)  [gene 13]
+ Min Contrib Score:   ${config.min_contribution_score}  (0=off, grad×(1+charge_diff))  [gene 13]
  Immune Period:       ${config.immune_period} training cycles  (newborn protection)  [gene 14]
  Prune Percentile:    ${config.prune_percentile}%  (0=off, bottom N% killed each epoch)
 
@@ -1636,7 +1642,7 @@
  [gene 12/13]= threshold lives inside each cell
  Fan-in      = avg connected upstream cells per neuron
  Would die   = cells that fail this test RIGHT NOW¹
- Contrib     = max(charge_diff) × avg|gradient|
+ Contrib     = avg|gradient| × (1 + charge_diff)
  Percentile  = bottom N% killed by rank each epoch²
 
 ── How pruning metrics work ──────────────
@@ -1647,7 +1653,7 @@
      samples (N = training set size = 1 epoch)
    • avg_gradient = mean |gradient| over last
      N samples
-   • contributionScore = charge_diff × avg_grad
+   • contributionScore = avg_grad × (1 + charge_diff)
   All pruning (P/O/Y/Z + percentile) runs at EPOCH
   BOUNDARY only — the "winter" cull. Every cell gets
   a full epoch of training before being judged.

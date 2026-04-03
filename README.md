@@ -117,7 +117,7 @@ Genes 12–13 control **pruning sensitivity**.
 | **10** | Gradient Thresh | GT | 10^uniform(−8,−4) → 1e-8 … 1e-4 | config (1e-4) | Pruning: cell dies if avg \|gradient protein\| ≤ GT | Neurotrophic receptor density |
 | **11** | Activation Slope | AS | uniform(0.01, 0.3) | config (0.01) | Leaky ReLU: if pre-activation ≤ 0, charge = AS × pre-activation → **shapes the charge protein** | Ion-channel selectivity |
 | **12** | Weight Prune Thresh | WPT | 10^uniform(−3,−1.5) → 0.001 … 0.032 | config (0.01) | Pruning: cell dies if max \|weight protein\| < WPT. Range capped below He-init scale so cells aren't born dead. | Synaptic maintenance threshold |
-| **13** | Min Contribution | MCS | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (0, off) | Pruning: cell dies if contributionScore < MCS (score = charge_diff × gradient) | Activity-dependent trophic need |
+| **13** | Min Contribution | MCS | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (1e-5) | Pruning: cell dies if contributionScore < MCS (score = gradient × (1 + charge_diff)) | Activity-dependent trophic need |
 | **14** | Immune Period | IP | integer 10–100 | config (50) | Newborn cell is **protected from all pruning** for IP training cycles (forward passes). Protein `backprops_remaining` counts down each forward pass. | Neonatal immune period |
 
 **How to read this table:** The "allele range" column shows the space of possible values a gene can take in autonomous mode. The "what the allele controls" column shows exactly which **protein or decision** the allele value feeds into at runtime — this is the gene→protein link.
@@ -234,7 +234,7 @@ These are NOT separate from proteins. They ARE proteins — built by the cell wa
 | **max_charge_diff_forward** | Max charge swing across forward-pass samples | Each forward pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
 | **max_charge_diff_reverse** | Max charge swing across reverse-pass samples | Each reverse pass: push charge, track running max − min | Activity pruning (P key), contribution score |
 | **avg_gradient_magnitude** | Rolling average of \|gradient\| over recent samples | Each backward pass: push \|gradient\| to history window (size = training data count), compute mean | Gradient pruning (O key), contribution score |
-| **contributionScore** | Combined activity + learning signal | `max(max_charge_diff_fwd, max_charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (Z key), percentile pruning, 3D color mode |
+| **contributionScore** | Combined activity + learning signal | `avg_gradient_magnitude × (1 + max(charge_diff_fwd, charge_diff_rev))` — gradient is the baseline; charge variability is a bonus | Contribution-score pruning (Z key), percentile pruning, 3D color mode |
 | **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > threshold`, never cleared (until explicit reset) | Conway death protection only (shouldDieGenetic) |
 | **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
 | **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set to `true` when `avg_gradient_magnitude > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
@@ -325,7 +325,7 @@ Cells whose maximum absolute weight falls below their weight prune threshold are
 
 ### Strategy 4: Contribution-Score Pruning — key Z
 
-Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses integrative protein (`contributionScore`) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
+Cells whose contribution score falls below their minimum contribution score are killed. The score formula is `avg_gradient_magnitude × (1 + max(charge_diff_fwd, charge_diff_rev))` — gradient is the baseline (is this cell learning?), and charge variability is a bonus multiplier (is it also producing varied activations?). This ensures cells that are actively learning survive even if their forward activations haven't diversified yet. Compared against gene 13 (Min Contribution Score) or config value.
 
 ### Strategy 5: Percentile Pruning (off by default, not cell-autonomous)
 
@@ -443,7 +443,7 @@ High slope (0.3) = permissive neuron, passes more signal through.
 
 **Step 4: Clip to [-10, 10] and store as the cell's new charge.**
 
-**Step 5: Update integrative memory proteins.** The new charge is pushed to the cell's charge history array. Rolling `max_charge_diff` is recomputed (max − min of recent charges). `contributionScore` is recomputed as `max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`.
+**Step 5: Update integrative memory proteins.** The new charge is pushed to the cell's charge history array. Rolling `max_charge_diff` is recomputed (max − min of recent charges). `contributionScore` is recomputed as `avg_gradient_magnitude × (1 + max(charge_diff_fwd, charge_diff_rev))`.
 
 ---
 
@@ -713,7 +713,7 @@ With **U** (autonomous) on, each cell can carry its **own** gene 11 value; with 
 | **P** | Toggle charge-delta pruning (low charge swing — gene 7) |
 | **O** | Toggle gradient pruning (low avg gradient — gene 10) |
 | **Y** | Toggle weight-magnitude pruning (max \|weight\| too small — gene 12) |
-| **Z** | Toggle contribution-score pruning (charge_diff × gradient too low — gene 13) |
+| **Z** | Toggle contribution-score pruning (gradient × (1 + charge_diff) too low — gene 13) |
 | **=** | Toggle prune logic between AND / OR (for charge-based pruning) |
 | **C** | Change pruning parameters: charge delta, gradient threshold, contribution score, percentile |
 | **U** | Toggle autonomous cell genes (per-cell evolved vs global config for genes 3–13) |
