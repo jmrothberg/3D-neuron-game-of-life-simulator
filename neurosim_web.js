@@ -253,7 +253,7 @@
   function SimState() {
     return {
       cells: makeCellsGrid(),
-      running: false, prune: false, gradient_prune: false, training_mode: false,
+      running: false, prune: false, gradient_prune: false, weight_mag_prune: false, contrib_score_prune: false, training_mode: false,
       andromida_mode: false, charge_change_protection: true, back_prop: false,
       training_data_loaded: false, display_updating: true, simulating: true, not_saved_yet: true,
       prune_logic: 'OR', display: 'proteins', direction_of_charge_flow: '+++++>>>>>',
@@ -364,7 +364,7 @@
         this.genes[9] = uniform(0.003, 0.05);
         this.genes[10] = Math.pow(10, uniform(-8, -4));
         this.genes[11] = uniform(0.01, 0.3);
-        this.genes[12] = Math.pow(10, uniform(-3, -1));
+        this.genes[12] = Math.pow(10, uniform(-3, -1.5));
         this.genes[13] = Math.pow(10, uniform(-6, -2));
       }
       this.colorGenes();
@@ -400,9 +400,9 @@
       const g10v = clip(this.genes[10], 1e-8, 1e-4);
       const s10 = clip((((log10(g10v) + 8) / 4) * 255) | 0, 0, 255);
       const s11 = clip((((this.genes[11] - 0.01) / 0.29) * 255) | 0, 0, 255);
-      /* gene 12: weight prune threshold (log scale ~1e-3..1e-1) */
-      const g12v = clip(this.genes[12], 1e-3, 1e-1);
-      const s12 = clip((((log10(g12v) + 3) / 2) * 255) | 0, 0, 255);
+      /* gene 12: weight prune threshold (log scale ~1e-3..~0.032) */
+      const g12v = clip(this.genes[12], 1e-3, 0.032);
+      const s12 = clip((((log10(g12v) + 3) / 1.5) * 255) | 0, 0, 255);
       /* gene 13: min contribution score (log scale ~1e-6..1e-2) */
       const g13v = clip(this.genes[13], 1e-6, 1e-2);
       const s13 = clip((((log10(g13v) + 6) / 4) * 255) | 0, 0, 255);
@@ -714,33 +714,35 @@
       if (accumulateOnly) this.accumulateWeightGradients(up, reach);
       else this.updateWeightsAndBias(up, lrn, reach, wd);
     }
-    shouldDie(prune, gp, pl) {
+    shouldDie(chargePrune, gradPrune, weightMagPrune, contribPrune, pl) {
       const cfg = CellConfig;
-      /* Gradient prune (O key): compare live avg_gradient_magnitude against threshold */
-      if (gp) {
+      /* Gradient prune (O key): compare avg_gradient_magnitude against threshold */
+      if (gradPrune) {
         const gt = (cfg && cfg.autonomous_network_genes) ? this.genes[10] : (cfg ? cfg.gradient_threshold : 1e-4);
         if (this.avg_gradient_magnitude <= gt) return true;
       }
-      /* Charge prune (P key): compare live rolling max_charge_diff against charge_delta.
-         Non-autonomous: use config value (so E/C changes apply immediately).
-         Autonomous: use per-cell gene 7. */
-      if (prune) {
+      /* Charge prune (P key): rolling max_charge_diff vs charge_delta (gene 7) */
+      if (chargePrune) {
         const cd = (cfg && cfg.autonomous_network_genes) ? this.genes[7] : (cfg ? cfg.charge_delta : this.genes[7]);
         const fwd = this.max_charge_diff_forward > cd;
         const rev = this.max_charge_diff_reverse > cd;
         if (pl === 'AND' && !(fwd && rev)) return true;
         if (pl === 'OR'  && !(fwd || rev)) return true;
       }
-      /* Weight-magnitude pruning: gene 12 = per-cell weight prune threshold */
-      const wpt = (cfg && cfg.autonomous_network_genes) ? this.genes[12] : (cfg ? cfg.weight_prune_threshold : 0.01);
-      if (prune && wpt > 0) {
-        let maxW = 0;
-        for (let i = 0; i < this.weights.length; i++) { const aw = Math.abs(this.weights[i]); if (aw > maxW) maxW = aw; }
-        if (maxW < wpt) return true;
+      /* Weight-magnitude pruning (Y key): gene 12 */
+      if (weightMagPrune) {
+        const wpt = (cfg && cfg.autonomous_network_genes) ? this.genes[12] : (cfg ? cfg.weight_prune_threshold : 0.01);
+        if (wpt > 0) {
+          let maxW = 0;
+          for (let i = 0; i < this.weights.length; i++) { const aw = Math.abs(this.weights[i]); if (aw > maxW) maxW = aw; }
+          if (maxW < wpt) return true;
+        }
       }
-      /* Contribution score pruning: gene 13 = per-cell min contribution score */
-      const mcs = (cfg && cfg.autonomous_network_genes) ? this.genes[13] : (cfg ? cfg.min_contribution_score : 0);
-      if (prune && mcs > 0 && this.contributionScore < mcs) return true;
+      /* Contribution score pruning (Z key): gene 13 */
+      if (contribPrune) {
+        const mcs = (cfg && cfg.autonomous_network_genes) ? this.genes[13] : (cfg ? cfg.min_contribution_score : 0);
+        if (mcs > 0 && this.contributionScore < mcs) return true;
+      }
       return false;
     }
     shouldDieGenetic(nAlive, prot) {
@@ -1001,7 +1003,7 @@
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
         if (cells[x][y][z]) {
           const cell = cells[x][y][z];
-          if (cell.shouldDie(state.prune, state.gradient_prune, state.prune_logic)) {
+          if (cell.shouldDie(state.prune, state.gradient_prune, state.weight_mag_prune, state.contrib_score_prune, state.prune_logic)) {
             cells[x][y][z] = null; gridTopoChanged = true; state.invalidateNeighborCache(); continue;
           }
         }
@@ -1541,7 +1543,7 @@
  Charge Flow:         ${state.direction_of_charge_flow}
  Prune Logic:         ${state.prune_logic}
  Training:            ${state.training_mode}  Backprop: ${state.back_prop}
- Prune: ${state.prune}  Grad Prune: ${state.gradient_prune}`;
+ P:Charge=${state.prune}  O:Grad=${state.gradient_prune}  Y:Weight=${state.weight_mag_prune}  Z:Contrib=${state.contrib_score_prune}`;
     if (sug) {
       out += `\n\n══════ NETWORK MEASUREMENTS ══════
  Cells:               ${sug.nCells}
@@ -1578,10 +1580,10 @@
       csScores.sort((a, b) => a - b);
       const pct = (p) => csScores[Math.min(((p * csScores.length) | 0), csScores.length - 1)];
       out += `\n\n══════ PRUNING READINESS ══════  (${totalH} hidden cells)
- Would die (P charge): ${wouldDieCharge}/${totalH}  (${state.prune_logic})
- Would die (O gradient): ${wouldDieGrad}/${totalH}
- Would die (weight mag): ${wouldDieWeight}/${totalH}
- Would die (contrib score): ${wouldDieCS}/${totalH}`;
+ Would die P (charge):  ${wouldDieCharge}/${totalH}  (${state.prune_logic}) ${state.prune ? '[ON]' : '[off]'}
+ Would die O (gradient): ${wouldDieGrad}/${totalH} ${state.gradient_prune ? '[ON]' : '[off]'}
+ Would die Y (weight):  ${wouldDieWeight}/${totalH} ${state.weight_mag_prune ? '[ON]' : '[off]'}
+ Would die Z (contrib):  ${wouldDieCS}/${totalH} ${state.contrib_score_prune ? '[ON]' : '[off]'}`;
       if (config.prune_percentile > 0) {
         const cutN = Math.max(1, Math.floor(totalH * config.prune_percentile / 100));
         out += `\n Percentile prune: bottom ${config.prune_percentile}% = ${cutN} cells`;
@@ -1989,7 +1991,7 @@
       `Layers: ${config.num_layers} | Cells: ${g3.nIn + g3.nHid + g3.nOut} | Color: ${_3D_COLOR_MODE_NAMES[state._3d_color_mode]} (G=cycle)`,
       `Epoch: ${state.training_cycles} | Correct: ${state.bingo_count}/${config.how_much_training_data} | Max: ${state.max_bingo_count}`,
       `Loss: ${state.running_avg_loss.toFixed(4)} | LR: ${config.learning_rate} | Dendrite: ${config.length_of_dendrite}`,
-      `Train: ${state.training_mode} | BackProp: ${state.back_prop} | Prune: ${state.prune}`,
+      `Train: ${state.training_mode} | BackProp: ${state.back_prop} | Prune: P=${state.prune} O=${state.gradient_prune} Y=${state.weight_mag_prune} Z=${state.contrib_score_prune}`,
     ].join('\n');
   }
 
@@ -2384,8 +2386,10 @@
         uiPrint(`Autonomous network genes: ${config.autonomous_network_genes}`);
         return;
       }
-      if (k.toLowerCase() === 'p') { state.prune = !state.prune; return; }
-      if (k.toLowerCase() === 'o') { state.gradient_prune = !state.gradient_prune; return; }
+      if (k.toLowerCase() === 'p') { state.prune = !state.prune; uiPrint('Charge pruning (P): ' + (state.prune ? 'ON' : 'OFF')); return; }
+      if (k.toLowerCase() === 'o') { state.gradient_prune = !state.gradient_prune; uiPrint('Gradient pruning (O): ' + (state.gradient_prune ? 'ON' : 'OFF')); return; }
+      if (k.toLowerCase() === 'y') { state.weight_mag_prune = !state.weight_mag_prune; uiPrint('Weight-magnitude pruning (Y): ' + (state.weight_mag_prune ? 'ON' : 'OFF')); return; }
+      if (k.toLowerCase() === 'z') { state.contrib_score_prune = !state.contrib_score_prune; uiPrint('Contribution-score pruning (Z): ' + (state.contrib_score_prune ? 'ON' : 'OFF')); return; }
       if (k === '=' || k === '+') { state.prune_logic = state.prune_logic === 'AND' ? 'OR' : 'AND'; return; }
       if (k.toLowerCase() === 'c' && !state.show_3d_view && state.charge_change_protection) {
         const sug = suggestParams(state, config);
@@ -2772,7 +2776,7 @@
             predictionPlotEpoch(state, predBatch, ba);
             state._training_sample_i = 0;
             /* Epoch-boundary percentile pruning (competitive / trophic factor) */
-            if (config.prune_percentile > 0 && (state.prune || state.gradient_prune)) {
+            if (config.prune_percentile > 0 && (state.prune || state.gradient_prune || state.weight_mag_prune || state.contrib_score_prune)) {
               const killed = percentilePrune(state, config);
               if (killed > 0) uiPrint(`Epoch ${state.training_cycles}: pruned ${killed} cells (bottom ${config.prune_percentile}% by contribution score)`);
             }
@@ -2801,7 +2805,11 @@
         ? ` (${state._training_sample_i}/${config.how_much_training_data})`
         : '';
       const K = Math.max(1, config.gradient_minibatch_size | 0);
-      statusLines.innerHTML = `<span style="color:${col}">Run=${state.running} Andromida=${state.andromida_mode} Prune=${state.prune} ${state.prune_logic} | ` +
+      const pAny = state.prune || state.gradient_prune || state.weight_mag_prune || state.contrib_score_prune;
+      const pStr = pAny
+        ? `P:Charge=${state.prune} O:Grad=${state.gradient_prune} Y:Weight=${state.weight_mag_prune} Z:Contrib=${state.contrib_score_prune} ${state.prune_logic}`
+        : 'Pruning=off';
+      statusLines.innerHTML = `<span style="color:${col}">Run=${state.running} Andromida=${state.andromida_mode} ${pStr} | ` +
         `Train=${state.training_mode} LR=${config.learning_rate.toFixed(4)} | CellAutonomous(4-13)=${config.autonomous_network_genes}</span><br/>` +
         `Dir=${state.direction_of_charge_flow} BackProp=${state.back_prop} Display=${state.display_updating} | ` +
         `Epoch=${state.training_cycles}${epochProgress} Samples=${config.how_much_training_data} K=${K} | ` +

@@ -123,7 +123,7 @@ Genes 12–13 control **pruning sensitivity**.
 | **9** | Learning Rate | LR | uniform(0.003, 0.05) | config (0.01) | Step size: `weight -= LR×grad` → controls **how fast weight and bias proteins change** | Hippocampal vs cortical plasticity |
 | **10** | Gradient Thresh | GT | 10^uniform(−8,−4) → 1e-8 … 1e-4 | config (1e-4) | Pruning: cell dies if avg \|gradient protein\| ≤ GT | Neurotrophic receptor density |
 | **11** | Activation Slope | AS | uniform(0.01, 0.3) | config (0.01) | Leaky ReLU: if pre-activation ≤ 0, charge = AS × pre-activation → **shapes the charge protein** | Ion-channel selectivity |
-| **12** | Weight Prune Thresh | WPT | 10^uniform(−3,−1) → 0.001 … 0.1 | config (0.01) | Pruning: cell dies if max \|weight protein\| < WPT | Synaptic maintenance threshold |
+| **12** | Weight Prune Thresh | WPT | 10^uniform(−3,−1.5) → 0.001 … 0.032 | config (0.01) | Pruning: cell dies if max \|weight protein\| < WPT. Range capped below He-init scale so cells aren't born dead. | Synaptic maintenance threshold |
 | **13** | Min Contribution | MCS | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (0, off) | Pruning: cell dies if contributionScore < MCS (score = charge_diff × gradient) | Activity-dependent trophic need |
 
 **How to read this table:** The "allele range" column shows the space of possible values a gene can take in autonomous mode. The "what the allele controls" column shows exactly which **protein or decision** the allele value feeds into at runtime — this is the gene→protein link.
@@ -259,7 +259,7 @@ The `U` key toggles `autonomous_network_genes`:
 | 9 (learning rate) | **Config value at runtime** (E/I changes apply immediately) | Per-cell gene: uniform(0.003, 0.05) |
 | 10 (gradient threshold) | **Config value at runtime** (E/C changes apply immediately) | Per-cell gene: 10^uniform(−8,−4) |
 | 11 (activation slope) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: uniform(0.01, 0.3) |
-| 12 (weight prune threshold) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−3,−1) |
+| 12 (weight prune threshold) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−3,−1.5) → 0.001–0.032 |
 | 13 (min contribution score) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−6,−2) |
 
 **Key difference:** With U off, changing a parameter via **E**, **I**, or **C** takes effect **immediately** on every cell — the config value is read fresh each forward/backward pass and each pruning check. With U on, each cell uses its own gene allele; the only way to change it is through **evolution** (birth with new genes) or **X** (re-init from config).
@@ -288,22 +288,22 @@ Offspring inherit genes via crossover from two parents + mutation. This creates 
 
 Pruning removes cells that don't contribute, mimicking synaptic pruning during brain development. The simulator implements five strategies that can be combined:
 
-### Strategy 1: Activity-Based Pruning (P key)
+### Strategy 1: Charge-Delta Pruning — key P
 
 Cells whose charge doesn't change significantly across training samples are killed. Uses cell memory (`max_charge_diff_forward`, `max_charge_diff_reverse`) compared against gene 7 (Charge Delta) or config value.
 
 - **AND logic (`=` key):** Cell must show significant change in *both* forward and reverse passes to survive. Strict — requires bidirectional contribution.
 - **OR logic (`=` key):** Cell survives if it shows significant change in *either* direction. More lenient.
 
-### Strategy 2: Gradient-Based Pruning (O key)
+### Strategy 2: Gradient Pruning — key O
 
 Cells with average gradient magnitude below their survival threshold are killed. Uses cell memory (`avg_gradient_magnitude`) compared against gene 10 (Gradient Threshold) or config value.
 
-### Strategy 3: Weight-Magnitude Pruning (active when P is on)
+### Strategy 3: Weight-Magnitude Pruning — key Y
 
 Cells whose maximum absolute weight falls below their weight prune threshold are killed. Uses protein data (max \|weight\|) compared against gene 12 (Weight Prune Threshold) or config value. Biologically: a synapse that has decayed to near zero carries no signal.
 
-### Strategy 4: Contribution-Score Pruning (active when P is on)
+### Strategy 4: Contribution-Score Pruning — key Z
 
 Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses cell memory (`contributionScore`) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
 
@@ -313,13 +313,13 @@ At the end of each epoch, the bottom N% of cells (ranked by contribution score) 
 
 ### Pruning Summary Table
 
-| Strategy | Trigger | What's Compared | Threshold Source | When Checked | Biological Analogy |
-|----------|---------|----------------|-----------------|--------------|-------------------|
-| Activity (P) | P key on | `max_charge_diff_*` | Gene 7 / config | Every evolution step | Activity-dependent survival |
-| Gradient (O) | O key on | `avg_gradient_magnitude` | Gene 10 / config | Every evolution step | Neurotrophic factor requirement |
-| Weight-magnitude | P key on | `max(\|weight\|)` | Gene 12 / config | Every evolution step | Synaptic maintenance threshold |
-| Contribution score | P key on | `contributionScore` | Gene 13 / config | Every evolution step | Combined activity + learning |
-| Percentile | End of epoch | Rank of `contributionScore` | Config `prune_percentile` | Once per epoch boundary | Competitive survival pressure |
+| Strategy | Key | What's Compared | Threshold Source | When Checked | Biological Analogy |
+|----------|-----|----------------|-----------------|--------------|-------------------|
+| Charge-delta | **P** | `max_charge_diff_*` | Gene 7 / config | Every evolution step | Activity-dependent survival |
+| Gradient | **O** | `avg_gradient_magnitude` | Gene 10 / config | Every evolution step | Neurotrophic factor requirement |
+| Weight-magnitude | **Y** | `max(\|weight\|)` | Gene 12 / config | Every evolution step | Synaptic maintenance threshold |
+| Contribution score | **Z** | `contributionScore` | Gene 13 / config | Every evolution step | Combined activity + learning |
+| Percentile | auto | Rank of `contributionScore` | Config `prune_percentile` | Once per epoch boundary | Competitive survival pressure |
 
 **Note:** "Every evolution step" means pruning conditions are checked continuously. However, the metrics being checked (`max_charge_diff`, `avg_gradient_magnitude`) are rolling averages over an epoch-worth of samples, so a cell must be consistently inactive over many samples to fail.
 
@@ -590,7 +590,7 @@ All screens include footnotes explaining when metrics are measured (snapshot vs 
 |---------|---------|
 | **Full neural-network training** | Forward pass, backpropagation, weight/bias updates, cross-entropy loss |
 | **14 heritable genes** | All 14 genes (breeding, network, learning, pruning) with autonomous/non-autonomous modes |
-| **5 pruning strategies** | Activity, gradient, weight-magnitude, contribution-score, and percentile — all configurable via **C** key |
+| **5 pruning strategies** | Charge-delta (**P**), gradient (**O**), weight-magnitude (**Y**), contribution-score (**Z**), and percentile (auto) — thresholds via **C** key |
 | **Epoch-based training loop** | One epoch = one full pass over all loaded samples; epochs are counted and displayed in the status bar |
 | **Minibatch gradient accumulation** | Configurable batch size **K** (key **K**); gradients accumulate over K samples before one weight update |
 | **Epoch shuffling** | Training samples are Fisher-Yates shuffled at the start of each epoch |
@@ -609,7 +609,7 @@ All screens include footnotes explaining when metrics are measured (snapshot vs 
 3. Load training data (**M**) — choose **D** for demo, **J** for your own MNIST JSON
 4. Set forward direction (**F**), enable backprop (**B**), start training (**T**)
 5. Check **V** screen for pruning readiness before enabling pruning
-6. Toggle pruning (**P** for activity/weight/contribution, **O** for gradient) to remove dead cells
+6. Toggle pruning (**P** charge, **O** gradient, **Y** weight-magnitude, **Z** contribution) to remove dead cells
 7. Use **C** to tune pruning thresholds (suggestions shown from network analysis)
 8. Disable display (**D**) for faster training — plots and status bar keep updating
 9. Watch accuracy climb — save good networks (**S**)
@@ -679,8 +679,10 @@ With **U** (autonomous) on, each cell can carry its **own** gene 11 value; with 
 |-----|--------|
 | **Space** | Toggle running mode (enables evolution loop: Andromida birth/death + pruning) |
 | **A** | Toggle Andromida mode (genetic birth/death using cell genes 0–2) |
-| **P** | Toggle activity-based pruning (charge change, weight magnitude, contribution score — genes 7, 12, 13) |
-| **O** | Toggle gradient-based pruning (avg gradient — gene 10) |
+| **P** | Toggle charge-delta pruning (low charge swing — gene 7) |
+| **O** | Toggle gradient pruning (low avg gradient — gene 10) |
+| **Y** | Toggle weight-magnitude pruning (max \|weight\| too small — gene 12) |
+| **Z** | Toggle contribution-score pruning (charge_diff × gradient too low — gene 13) |
 | **=** | Toggle prune logic between AND / OR (for charge-based pruning) |
 | **C** | Change pruning parameters: charge delta, gradient threshold, contribution score, percentile |
 | **U** | Toggle autonomous cell genes (per-cell evolved vs global config for genes 3–13) |
