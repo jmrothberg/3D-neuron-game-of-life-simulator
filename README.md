@@ -158,7 +158,31 @@ Every cell carries a single chromosome of 15 genes, organized in five functional
                       evolved per-cell             evolved per-cell      evolved per-cell     evolved
 ```
 
-**Reading the chromosome:** Gene 0 (leftmost) through gene 13 (rightmost). Breeding genes are always per-cell. Genes 3–13 can be globally configured (U off) or independently evolved (U on). In autonomous mode, offspring inherit genes from two parents via crossover, with germline mutation controlled by gene 3.
+**Reading the chromosome:** Gene 0 (leftmost) through gene 14 (rightmost). Breeding genes are always per-cell. Genes 3–14 can be globally configured (U off) or independently evolved (U on). In autonomous mode, offspring inherit genes from two parents via crossover, with germline mutation controlled by gene 3.
+
+#### Gene → Protein Map
+
+Every gene either **creates** a protein, **controls** how a protein changes, sets a **threshold** compared against a protein, or is a **regulatory element** that makes no protein at all:
+
+| Gene | Relationship | Protein(s) affected |
+|------|-------------|---------------------|
+| **0** OT | **Regulatory** — no protein | Compares neighbor count against allele → death decision |
+| **1** IT | **Regulatory** — no protein | Compares neighbor count against allele → death decision |
+| **2** BT | **Regulatory** — no protein | Compares neighbor count against allele → birth decision |
+| **3** MR | **Regulatory** — no protein | Controls mutation probability (like DNA-repair fidelity) |
+| **4** WG | **Creates** | `weights[]` — determines array size (number of synapses) |
+| **5** BR | **Creates** | `bias` — sets initial magnitude range |
+| **6** AW | **Controls** | `weights[]` — He initialization scaling |
+| **7** CD | **Threshold** | Compared against `max_charge_diff_*` integrative proteins |
+| **8** WD | **Controls** | `weights[]` — decay rate each update |
+| **9** LR | **Controls** | `weights[]` + `bias` — learning step size |
+| **10** GT | **Threshold** | Compared against `avg_gradient_magnitude` integrative protein |
+| **11** AS | **Controls** | `charge` — leaky ReLU negative slope |
+| **12** WPT | **Threshold** | Compared against max \|`weights`\| long-term protein |
+| **13** MCS | **Threshold** | Compared against `contributionScore` integrative protein |
+| **14** IP | **Creates** | `backprops_remaining` — sets initial countdown value |
+
+**Why 15 genes but only 13 proteins:** Genes 0–3 are regulatory elements — they control discrete events (death, birth, mutation) based on environmental signals, not protein products. Meanwhile, genes 4, 6, 8, and 9 all share the `weights` protein (create it, scale it, decay it, update it). In biology, multiple genes routinely govern the same protein through different regulatory pathways.
 
 #### Gene Groups Explained
 
