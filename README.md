@@ -1,6 +1,6 @@
 # JMR Genetic Game of Neural Network Life
 
-A bio-inspired neural network simulator where neurons are living cells with **15 genes**, **6 proteins**, and **7 cell-memory fields** that grow, connect, learn, and die on a 28×28 grid. Networks self-assemble through genetic rules, learn via backpropagation with weights stored *inside* each cell's dendrites, and are sculpted by environmental pruning — combining Conway's Game of Life mechanics with gradient descent.
+A bio-inspired neural network simulator where neurons are living cells with **15 genes** and **13 proteins** that grow, connect, learn, and die on a 28×28 grid. Networks self-assemble through genetic rules, learn via backpropagation with weights stored *inside* each cell's dendrites, and are sculpted by environmental pruning — combining Conway's Game of Life mechanics with gradient descent.
 
 **100/100 on MNIST. 98/100 on Fashion-MNIST.**
 
@@ -35,13 +35,15 @@ This simulator: weights live **inside each cell's dendrites** — a flat 1D arra
 
 ---
 
-## The Cell: Genes, Proteins, and Cell Memory
+## The Cell: Genes and Proteins
 
-Every cell carries three types of information, inspired by molecular biology:
+Every cell carries two types of information, inspired by molecular biology:
 
 - **Genes (15 values)** — inherited, stable parameters that define the cell's identity, structure, pruning sensitivity, immunity, and **how protein state is created and updated**. These are the cell's *genotype*.
-- **Proteins (6 values)** — dynamic *phenotype*: charge, error, bias, weights, gradient, backprops_remaining. Their **layout, initialization, and dynamics are gene-programmed**; their **numerical values change** every training step (see below).
-- **Cell Memory (7 fields)** — not a separate chemical layer: they are **integrative traces of what the charge and gradient proteins have been doing** over recent training (see below). Used for pruning and survival decisions.
+- **Proteins (13 values)** — ALL dynamic cell state is protein state. This is the cell's *phenotype*. Proteins operate at three timescales:
+  - **Fast signaling** (3): charge, error, gradient — overwritten each forward/backward step
+  - **Long-term memory** (3): weights, bias, backprops_remaining — persist and accumulate across samples; weights and bias ARE the learned knowledge
+  - **Integrative memory** (7): rolling statistics derived from charge and gradient trajectories — the cell watches its own protein activity over time and builds compressed history for pruning decisions (like post-translational modifications that mark how active a pathway has been)
 
 ### How genes specify proteins (expression, updates, and cutoffs)
 
@@ -55,43 +57,43 @@ In this model, **proteins are not arbitrary numbers** — they are **generated a
 
 So: **alleles supply architecture, initial scales, update rules, and threshold levels**; **proteins carry the evolving numbers** that learning and activity produce. Cutoff **values** may be **initialized from** or **stored as** gene (or config) alleles, but the **quantities being cut off** live in the phenotype and **can change** every sample.
 
-### Memory: which proteins store what (and how “cell memory” fits)
+### Memory: all memory is protein state
 
-**Genes do not store experience.** Experience is carried in **protein-level state** and in **summaries derived from protein trajectories** — a useful mental model is **post-translational / activity-dependent modification**: the genome is fixed, but what happens to the cell **leaves marks in proteins and in slow variables built from protein readouts**.
+**Genes do not store experience.** ALL experience is carried in **proteins** — a useful mental model is **post-translational / activity-dependent modification**: the genome is fixed, but what happens to the cell **leaves marks in proteins at different timescales**.
 
-**1. Long-term memory — stored directly in proteins**
-
-| Protein | What is “remembered” | Init range | Typical trained range |
-|---------|----------------------|------------|----------------------|
-| **Weights** (`weights[]`) | Learned connection strengths; persist and accumulate across samples. Main **synaptic memory**. | He-scaled: randn × √(2/fan_in), clipped [−1, 1] | −2 to 2 (weight decay pulls toward 0) |
-| **Bias** | Learned resting offset; persistent across samples. | uniform(−gene 5, +gene 5); default ±0.01 | −0.5 to 0.5 typically |
-
-Together, **weights** and **bias** are where the network’s **learned mapping** actually lives.
-
-**2. Fast signaling — proteins that change every step (not “storage” in the archival sense)**
+**Fast signaling proteins** (overwritten each step — carry "what is happening now"):
 
 | Protein | Role | Init | Runtime range |
 |---------|------|------|---------------|
-| **Charge** | Current activation after forward pass — a **snapshot**, overwritten on the next image. | 0 (hidden/output); random (input) | Hard-clipped [−10, 10]; typically −1 to 1 after leaky ReLU |
-| **Error** | Current backprop signal for this step. | ε (1e-15) | Hard-clipped [−10, 10]; typically small |
-| **Gradient** | Immediate direction of plasticity for each weight slot this step. | 0 | Clipped to ±gradient_clip (default ±0.5) |
-| **backprops_remaining** | Immune countdown — decremented each training cycle (forward pass). While > 0, cell is protected from all pruning. | gene 14 (10–100) | Counts down to 0, then stays at 0 |
+| **Charge** | Activation after forward pass — a snapshot, overwritten on each image. | 0 (hidden/output); random (input) | Hard-clipped [−10, 10]; typically −1 to 1 after leaky ReLU |
+| **Error** | Backprop error signal for this step. | ε (1e-15) | Hard-clipped [−10, 10]; typically small |
+| **Gradient** | Immediate learning direction for each weight slot. | 0 | Clipped to ±gradient_clip (default ±0.5) |
 
-These are essential for learning, but they are **not** where the cell keeps a running record of the whole epoch by themselves.
+**Long-term memory proteins** (persist across samples — carry "what was learned"):
 
-**3. Integrative “memory” — the seven fields as traces of protein activity**
+| Protein | What is remembered | Init range | Typical trained range |
+|---------|-------------------|------------|----------------------|
+| **Weights** (`weights[]`) | Learned connection strengths; accumulate across samples. Main **synaptic memory**. | He-scaled: randn × √(2/fan_in), clipped [−1, 1] | −2 to 2 (weight decay pulls toward 0) |
+| **Bias** | Learned resting offset; persistent across samples. | uniform(−gene 5, +gene 5); default ±0.01 | −0.5 to 0.5 typically |
+| **backprops_remaining** | Immune countdown — decremented each training cycle (forward pass). While > 0, cell is immune to all pruning. | gene 14 (10–100) | Counts down to 0, then stays at 0 |
 
-The **seven cell-memory fields** are **not** extra proteins in the table above. In biological terms, think of them as **activity-dependent integration** on top of the same phenotype: the cell **watches its own charge and gradient proteins over time** and updates rolling summaries.
+Together, **weights** and **bias** are where the network's **learned mapping** actually lives. **backprops_remaining** protects newborn cells until they've had enough training cycles to integrate.
 
-| Cell memory field | Built from which proteins / behavior |
-|-------------------|--------------------------------------|
-| **max_charge_diff_forward** / **max_charge_diff_reverse** | History of **charge** along forward vs reverse flow (range of firing over a sliding window). |
-| **avg_gradient_magnitude** | History of **\|gradient\|** (how strongly the cell has been nudged to learn). |
-| **contributionScore** | Combines charge-diff traces × average gradient magnitude (“active” × “learning”). |
-| **significant_charge_change_*** / **significant_gradient_change** | Sticky flags: “has **charge-** or **gradient**-related behavior ever crossed a threshold?” — like a long-lived mark once a pathway has been strongly engaged; used for Conway-style protection, not for the numeric pruning averages. |
+**Integrative memory proteins** (rolling statistics — carry "compressed history of recent activity"):
 
-So: **weights and bias** store **what was learned**; **charge, error, gradient** carry **what is happening now**; the **seven memory fields** store **compressed history of charge and gradient dynamics** for pruning and scoring — conceptually aligned with **post-translational, experience-dependent state** without ever editing the genome.
+These proteins are built from the **trajectories of charge and gradient** over time. Think of them as activity-dependent modifications: the cell watches its own fast proteins and builds slow summaries. All pruning decisions read from them.
 
+| Protein | What it tracks | How it's updated | Used by |
+|---------|---------------|-----------------|---------|
+| **max_charge_diff_forward** | Max charge swing across forward-pass samples | Each forward pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
+| **max_charge_diff_reverse** | Max charge swing across reverse-pass samples | Each reverse pass: push charge, track running max − min | Activity pruning (P key), contribution score |
+| **avg_gradient_magnitude** | Rolling average of \|gradient\| over recent samples | Each backward pass: push \|gradient\| to history window, compute mean | Gradient pruning (O key), contribution score |
+| **contributionScore** | Combined activity + learning signal | `max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (Z key), percentile pruning, 3D color mode |
+| **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set `true` when `max_charge_diff_forward > threshold`, never cleared | Conway death protection only |
+| **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only |
+| **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set `true` when `avg_gradient_magnitude > threshold`, never cleared | Conway death protection only |
+
+**Summary:** Fast proteins carry what is happening now. Long-term proteins carry what was learned. Integrative proteins carry compressed history for pruning. ALL memory lives in proteins — there is no separate "memory field" concept.
 ---
 
 ### The 14 Genes
@@ -148,7 +150,7 @@ Every cell carries a single chromosome of 15 genes, organized in five functional
 │ cell live,    │ and how are weights      │ learn, and what   │ to stay alive?       │ I protected │
 │ die, or       │ seeded? How fast do      │ is my response    │ Thresholds compared  │ from pruning│
 │ reproduce?    │ weights decay?           │ curve shape       │ against my proteins  │ after birth?│
-│               │                          │ (slope=gene 11).  │ and cell memory.     │             │
+│               │                          │ (slope=gene 11).  │ and proteins.        │             │
 └───────────────┴──────────────────────────┴───────────────────┴──────────────────────┴─────────────┘
      Always           Non-autonomous:             Non-autonomous:       Non-autonomous:       Non-auto:
      per-cell         from global config          from global config    from global config    from config
@@ -187,59 +189,66 @@ Genes 7, 8, 10, 12, and 13 span multiple orders of magnitude. If you use a unifo
 
 ---
 
-### The 6 Proteins
+### The 13 Proteins
 
-These are the cell's *expressed behavior*: their **existence and update laws** come from **genes** (above); the **numbers in the table below** change every forward/backward pass as training runs.
+These are ALL the cell's dynamic state — its *expressed behavior*. Organized by timescale:
 
-| Protein | Symbol | What It Is | How It Changes | Range | Biological Analogy |
-|---------|--------|-----------|----------------|-------|--------------------|
-| **Charge** | — | Activation signal | Forward: `leaky_ReLU(bias + Σ(upstream_charge × weight))` | [−10, 10] | Membrane potential / firing rate |
-| **Error** | — | Backprop error signal | Backward: accumulated from downstream errors × reversed weights | [−10, 10] | Retrograde signaling molecules |
-| **Bias** | — | Baseline offset before activation | `bias -= lr × error` each backward step | Initialized near 0 | Resting membrane potential |
-| **Weights** | — | Synaptic connection strengths (1D array, size = gene 4) | He-init: `randn × √(2/fan_in)`. Update: `w -= lr × gradient + decay × w` | Unconstrained | Synaptic receptor density |
-| **Gradient** | — | Most recent learning signal | `error × upstream_charge`, clipped to [−clip, +clip] | [−clip, clip] | Calcium/CaMKII activity level |
-| **backprops_remaining** | — | Immune countdown (gene 14) | Init from gene 14; decrements each training cycle. While > 0, cell is immune to all pruning. | 0 to gene 14 value | Neonatal immune period |
+#### Fast Signaling Proteins (3) — overwritten each forward/backward step
 
----
+| Protein | What It Is | How It Changes | Range | Biological Analogy |
+|---------|-----------|----------------|-------|--------------------|
+| **Charge** | Activation signal | Forward: `leaky_ReLU(bias + Σ(upstream_charge × weight))` | [−10, 10] | Membrane potential / firing rate |
+| **Error** | Backprop error signal | Backward: accumulated from downstream errors × reversed weights | [−10, 10] | Retrograde signaling molecules |
+| **Gradient** | Most recent learning signal | `error × upstream_charge`, clipped to [−clip, +clip] | [−clip, clip] | Calcium/CaMKII activity level |
 
-### The 7 Cell Memory Fields
+#### Long-term Memory Proteins (3) — persist and accumulate across samples
 
-These fields are the **integrative traces** described in **Memory: which proteins store what** — summaries of **charge** and **gradient** over time, not extra named proteins in the six-protein list. All pruning decisions read from them; the cell carries its own recent history of activity and plasticity.
+| Protein | What It Is | How It Changes | Range | Biological Analogy |
+|---------|-----------|----------------|-------|--------------------|
+| **Weights** | Synaptic connection strengths (1D array, size = gene 4) | He-init: `randn × √(2/fan_in)`. Update: `w -= lr × gradient + decay × w` | Unconstrained | Synaptic receptor density |
+| **Bias** | Baseline offset before activation | `bias -= lr × error` each backward step | Initialized near 0 | Resting membrane potential |
+| **backprops_remaining** | Immune countdown (gene 14) | Init from gene 14; decrements each training cycle (forward pass). While > 0, cell is immune to all pruning. | 0 to gene 14 value | Neonatal immune period |
 
-| Field | What It Tracks | How It's Updated | Used By |
-|-------|---------------|-----------------|---------|
-| **max_charge_diff_forward** | Max charge swing across forward-pass training samples | Each forward pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
-| **max_charge_diff_reverse** | Max charge swing across reverse-pass training samples | Each reverse pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
+Weights and bias ARE the learned knowledge — the network's memory of what it has been taught.
+
+#### Integrative Memory Proteins (7) — rolling statistics derived from fast protein trajectories
+
+These are NOT separate from proteins. They ARE proteins — built by the cell watching its own charge and gradient over time. Think of them as post-translational modifications that accumulate with activity. All pruning decisions read from them.
+
+| Protein | What It Tracks | How It's Updated | Used By |
+|---------|---------------|-----------------|---------|
+| **max_charge_diff_forward** | Max charge swing across forward-pass samples | Each forward pass: push charge, track running max − min over last epoch-worth of samples | Activity pruning (P key), contribution score |
+| **max_charge_diff_reverse** | Max charge swing across reverse-pass samples | Each reverse pass: push charge, track running max − min | Activity pruning (P key), contribution score |
 | **avg_gradient_magnitude** | Rolling average of \|gradient\| over recent samples | Each backward pass: push \|gradient\| to history window (size = training data count), compute mean | Gradient pruning (O key), contribution score |
-| **contributionScore** | Combined activity + learning signal | `max(max_charge_diff_fwd, max_charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (gene 13), percentile pruning, 3D color mode |
+| **contributionScore** | Combined activity + learning signal | `max(max_charge_diff_fwd, max_charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (Z key), percentile pruning, 3D color mode |
 | **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > threshold`, never cleared (until explicit reset) | Conway death protection only (shouldDieGenetic) |
 | **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
 | **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set to `true` when `avg_gradient_magnitude > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
 
-**Key design principle:** All rolling metrics (`max_charge_diff_*`, `avg_gradient_magnitude`, `contributionScore`) are *live* — they reflect recent training and are used for pruning decisions. The *sticky* flags (`significant_charge_change_*`, `significant_gradient_change`) are only used to protect cells from Conway-style genetic death, ensuring that cells that have ever contributed are not killed by overcrowding/isolation rules.
+**Key design principle:** Rolling metrics (`max_charge_diff_*`, `avg_gradient_magnitude`, `contributionScore`) are *live* — they reflect recent training and are used for pruning. Sticky flags (`significant_*`) are only for Conway-style genetic death protection: once a cell has ever been significantly active, it's protected from overcrowding/isolation rules.
 
 **Pruning uses rolling windows, not single-sample snapshots.** The rolling window for `max_charge_diff_*` and `avg_gradient_magnitude` is sized to the training set (1 epoch worth of samples). A cell must be consistently inactive or non-learning across many images before it can be pruned.
 
 ---
 
-### How Genes, Proteins, and Cell Memory Interact
+### How Genes and Proteins Interact
 
-The three information layers create a two-timescale system:
+Genes and proteins create a two-timescale system:
 
 | Timescale | What Changes | Mechanism |
 |-----------|-------------|-----------|
 | **Per-sample** (fast) | Proteins: charge, error, weights, bias, gradient | Forward/backward pass, gradient descent |
-| **Per-sample** (fast) | Cell memory: rolling charge diffs, gradient history, contribution score | Updated inside `updateCharge()` and `updateGradientImportance()` |
+| **Per-sample** (fast) | Integrative memory proteins: rolling charge diffs, gradient history, contribution score | Updated inside `updateCharge()` and `updateGradientImportance()` |
 | **Per-generation** (slow) | Genes 0–13 | Crossover, mutation, natural selection |
 
 - Gene 4 determines *how many* weights a cell has → Proteins (weights) fill that array and are trained
-- Gene 7 determines the *threshold* for significant activity → Cell memory (charge diffs) is measured against it
+- Gene 7 determines the *threshold* for significant activity → Integrative protein (charge diffs) is measured against it
 - Gene 8 determines *how fast* weights decay → Protein (weights) shrink by that factor each update
 - Gene 9 determines *how fast* the cell learns → Protein (weights) update at that rate
-- Gene 10 determines the *gradient survival threshold* → Cell memory (avg_gradient_magnitude) is compared against it
+- Gene 10 determines the *gradient survival threshold* → Integrative protein (avg_gradient_magnitude) is compared against it
 - Gene 11 determines the *response curve* → Protein (charge) passes through that activation function
 - Gene 12 determines *weight-magnitude pruning sensitivity* → Protein (max \|weight\|) is compared against it
-- Gene 13 determines *contribution-score pruning sensitivity* → Cell memory (contributionScore) is compared against it
+- Gene 13 determines *contribution-score pruning sensitivity* → Integrative protein (contributionScore) is compared against it
 - Genes 0–2 determine *who lives and dies* → The population of cells is shaped by these rules
 
 ---
@@ -295,14 +304,14 @@ Pruning removes cells that don't contribute, mimicking synaptic pruning during b
 
 ### Strategy 1: Charge-Delta Pruning — key P
 
-Cells whose charge doesn't change significantly across training samples are killed. Uses cell memory (`max_charge_diff_forward`, `max_charge_diff_reverse`) compared against gene 7 (Charge Delta) or config value.
+Cells whose charge doesn't change significantly across training samples are killed. Uses integrative proteins (`max_charge_diff_forward`, `max_charge_diff_reverse`) compared against gene 7 (Charge Delta) or config value.
 
 - **AND logic (`=` key):** Cell must show significant change in *both* forward and reverse passes to survive. Strict — requires bidirectional contribution.
 - **OR logic (`=` key):** Cell survives if it shows significant change in *either* direction. More lenient.
 
 ### Strategy 2: Gradient Pruning — key O
 
-Cells with average gradient magnitude below their survival threshold are killed. Uses cell memory (`avg_gradient_magnitude`) compared against gene 10 (Gradient Threshold) or config value.
+Cells with average gradient magnitude below their survival threshold are killed. Uses integrative protein (`avg_gradient_magnitude`) compared against gene 10 (Gradient Threshold) or config value.
 
 ### Strategy 3: Weight-Magnitude Pruning — key Y
 
@@ -310,7 +319,7 @@ Cells whose maximum absolute weight falls below their weight prune threshold are
 
 ### Strategy 4: Contribution-Score Pruning — key Z
 
-Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses cell memory (`contributionScore`) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
+Cells whose contribution score (`max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`) falls below their minimum contribution score are killed. Uses integrative protein (`contributionScore`) compared against gene 13 (Min Contribution Score) or config value. Biologically: combines "is this cell active?" with "is it learning?" into a single survival test.
 
 ### Strategy 5: Percentile Pruning (automatic at epoch boundary)
 
@@ -417,7 +426,7 @@ High slope (0.3) = permissive neuron, passes more signal through.
 
 **Step 4: Clip to [-10, 10] and store as the cell's new charge.**
 
-**Step 5: Update cell memory.** The new charge is pushed to the cell's charge history array. Rolling `max_charge_diff` is recomputed (max − min of recent charges). `contributionScore` is recomputed as `max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`.
+**Step 5: Update integrative memory proteins.** The new charge is pushed to the cell's charge history array. Rolling `max_charge_diff` is recomputed (max − min of recent charges). `contributionScore` is recomputed as `max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude`.
 
 ---
 
@@ -517,7 +526,7 @@ using the upstream cell charges (same cells used in the forward pass):
 In autonomous mode, `learning_rate` comes from gene 9 and `weight_decay`
 from gene 8 — each cell runs its own gradient descent at its own speed.
 
-### Job 3: Update Cell Memory
+### Job 3: Update Integrative Memory Proteins
 
 After weight updates, `updateGradientImportance()` pushes |gradient| to the rolling history, recomputes `avg_gradient_magnitude`, and recomputes `contributionScore`.
 
@@ -545,7 +554,7 @@ After weight updates, `updateGradientImportance()` pushes |gradient| to the roll
                  Layer 2 updates its weights using Layer 1 charges
                  Layer 1 error = accumulated from Layer 2 errors
                  Layer 1 updates its weights using Layer 0 charges
-    5. Cell memory updated: charge diffs, gradient history, contribution scores
+    5. Integrative memory proteins updated: charge diffs, gradient history, contribution scores
     6. Repeat for next training sample
 ```
 

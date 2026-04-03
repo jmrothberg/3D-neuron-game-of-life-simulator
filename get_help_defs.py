@@ -43,22 +43,25 @@ def get_defs():
     """
 
     jmr_defs2 = """
-    THE 6 PROTEINS  (dynamic, change every training step — the cell's phenotype)
+    THE 13 PROTEINS  (ALL dynamic cell state — the cell's phenotype)
 
+    ── Fast Signaling (overwritten each step) ──────────────────────────────
     Charge     Activation signal.   Forward: leaky_ReLU(bias + Σ(upstream_charge × weight)).  Range [−10, 10].
     Error      Backprop signal.     Backward: accumulated from downstream errors × reversed weights.
-    Bias       Baseline offset.     Updated each step: bias -= lr × error.  Initialized near 0.
-    Weights    Synaptic strengths.  He-init: randn × √(2/fan_in).  Update: w -= lr × grad + decay × w.
     Gradient   Learning signal.     gradient = error × upstream_charge, clipped.
-    backprops_remaining  Immune countdown. Init from gene 14. Decrements each training cycle (forward pass). While > 0, cell is immune to pruning.
 
-    THE 7 CELL MEMORY FIELDS  (rolling statistics, stored in the cell, used for pruning)
+    ── Long-term Memory (persist across samples — the learned knowledge) ───
+    Weights    Synaptic strengths.  He-init: randn × √(2/fan_in).  Update: w -= lr × grad + decay × w.
+    Bias       Baseline offset.     Updated each step: bias -= lr × error.  Initialized near 0.
+    backprops_remaining  Immune countdown. Init from gene 14. Decrements each training cycle. While > 0, immune to pruning.
 
+    ── Integrative Memory (rolling statistics from charge/gradient history) ─
     max_charge_diff_forward    Max charge swing (max−min) across forward-pass samples.
     max_charge_diff_reverse    Max charge swing across reverse-pass samples.
     avg_gradient_magnitude     Rolling mean of |gradient| over recent samples (window = training data size).
     contributionScore          max(charge_diff_fwd, charge_diff_rev) × avg_gradient_magnitude.
-    significant_charge_change  Sticky flag: has charge ever exceeded gene 7. Used only for Conway death protection.
+    significant_charge_change  Sticky flag: has charge ever exceeded gene 7. Conway death protection only.
+    significant_charge_change_reverse  Sticky flag: has reverse charge exceeded gene 7. Conway protection.
     significant_gradient_change Sticky flag: has gradient ever exceeded gene 10. Conway death protection only.
 
     ── How They Interact ─────────────────────────────────────────────────────

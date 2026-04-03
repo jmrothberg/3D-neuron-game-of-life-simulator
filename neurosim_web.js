@@ -1521,7 +1521,7 @@
     s.push('');
     s.push('── How pruning differs from these stats ──');
     s.push('Pruning does NOT use single-sample snapshots.');
-    s.push('Cell Memory accumulates rolling-window metrics:');
+    s.push('Integrative memory proteins accumulate rolling-window metrics:');
     s.push(' • max_charge_diff = max−min charge over last');
     s.push('   epoch-worth of samples (window = training set)');
     s.push(' • avg_gradient_magnitude = mean |grad| over');
@@ -1627,8 +1627,8 @@
  Percentile  = bottom N% killed by rank each epoch²
 
 ── How pruning metrics work ──────────────
-¹ "Would die" previews current cell memory.
-  Cell memory uses ROLLING WINDOWS (not single
+¹ "Would die" previews integrative memory proteins.
+  These proteins use ROLLING WINDOWS (not single
   samples):
    • charge_diff = max−min charge over last N
      samples (N = training set size = 1 epoch)
