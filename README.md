@@ -75,6 +75,7 @@ Together, **weights** and **bias** are where the network’s **learned mapping**
 | **Charge** | Current activation after forward pass — a **snapshot**, overwritten on the next image. | 0 (hidden/output); random (input) | Hard-clipped [−10, 10]; typically −1 to 1 after leaky ReLU |
 | **Error** | Current backprop signal for this step. | ε (1e-15) | Hard-clipped [−10, 10]; typically small |
 | **Gradient** | Immediate direction of plasticity for each weight slot this step. | 0 | Clipped to ±gradient_clip (default ±0.5) |
+| **backprops_remaining** | Immune countdown — decremented each backprop pass. While > 0, cell is protected from all pruning. | gene 14 (2–15) | Counts down to 0, then stays at 0 |
 
 These are essential for learning, but they are **not** where the cell keeps a running record of the whole epoch by themselves.
 
@@ -125,33 +126,34 @@ Genes 12–13 control **pruning sensitivity**.
 | **11** | Activation Slope | AS | uniform(0.01, 0.3) | config (0.01) | Leaky ReLU: if pre-activation ≤ 0, charge = AS × pre-activation → **shapes the charge protein** | Ion-channel selectivity |
 | **12** | Weight Prune Thresh | WPT | 10^uniform(−3,−1.5) → 0.001 … 0.032 | config (0.01) | Pruning: cell dies if max \|weight protein\| < WPT. Range capped below He-init scale so cells aren't born dead. | Synaptic maintenance threshold |
 | **13** | Min Contribution | MCS | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (0, off) | Pruning: cell dies if contributionScore < MCS (score = charge_diff × gradient) | Activity-dependent trophic need |
+| **14** | Immune Period | IP | integer 2–15 | config (5) | Newborn cell is **protected from all pruning** for IP backprop passes. Protein `backprops_remaining` counts down to 0. | Neonatal immune period |
 
 **How to read this table:** The "allele range" column shows the space of possible values a gene can take in autonomous mode. The "what the allele controls" column shows exactly which **protein or decision** the allele value feeds into at runtime — this is the gene→protein link.
 
 #### The Cell Chromosome
 
-Every cell carries a single chromosome of 14 genes, organized in four functional regions:
+Every cell carries a single chromosome of 15 genes, organized in five functional regions:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          CELL CHROMOSOME  (14 genes)                                │
-├───────────────┬──────────────────────────┬───────────────────┬──────────────────────┤
-│  BREEDING     │  NETWORK STRUCTURE       │  LEARNING         │  PRUNING SENSITIVITY │
-│  (survival)   │  (anatomy & wiring)      │  (plasticity)     │  (trophic thresholds)│
-├───┬───┬───┬───┼───┬───┬───┬───┬───┬──────┼───┬───┬──────────┼───┬──────────────────┤
-│ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │      │ 9 │10 │ 11       │12 │ 13               │
-│OT │IT │BT │MR │WG │BR │AW │CD │WD │      │LR │GT │ AS       │WPT│ MCS              │
-├───┴───┴───┴───┼───┴───┴───┴───┴───┴──────┼───┴───┴──────────┼───┴──────────────────┤
-│ When does the │ How big are my dendrites │ How fast do I     │ How hard must I work │
-│ cell live,    │ and how are weights      │ learn, and what   │ to stay alive?       │
-│ die, or       │ seeded? How fast do      │ is my response    │ Thresholds compared  │
-│ reproduce?    │ weights decay?           │ curve shape       │ against my proteins  │
-│               │                          │ (slope=gene 11).  │ and cell memory.     │
-└───────────────┴──────────────────────────┴───────────────────┴──────────────────────┘
-     Always           Non-autonomous:             Non-autonomous:       Non-autonomous:
-     per-cell         from global config          from global config    from global config
-                      Autonomous (U on):          Autonomous (U on):    Autonomous (U on):
-                      evolved per-cell             evolved per-cell      evolved per-cell
+┌────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                CELL CHROMOSOME  (15 genes)                                        │
+├───────────────┬──────────────────────────┬───────────────────┬──────────────────────┬─────────────┤
+│  BREEDING     │  NETWORK STRUCTURE       │  LEARNING         │  PRUNING SENSITIVITY │  IMMUNITY   │
+│  (survival)   │  (anatomy & wiring)      │  (plasticity)     │  (trophic thresholds)│  (neonatal) │
+├───┬───┬───┬───┼───┬───┬───┬───┬───┬──────┼───┬───┬──────────┼───┬──────────────────┼─────────────┤
+│ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │      │ 9 │10 │ 11       │12 │ 13               │ 14          │
+│OT │IT │BT │MR │WG │BR │AW │CD │WD │      │LR │GT │ AS       │WPT│ MCS              │ IP          │
+├───┴───┴───┴───┼───┴───┴───┴───┴───┴──────┼───┴───┴──────────┼───┴──────────────────┼─────────────┤
+│ When does the │ How big are my dendrites │ How fast do I     │ How hard must I work │ How long am │
+│ cell live,    │ and how are weights      │ learn, and what   │ to stay alive?       │ I protected │
+│ die, or       │ seeded? How fast do      │ is my response    │ Thresholds compared  │ from pruning│
+│ reproduce?    │ weights decay?           │ curve shape       │ against my proteins  │ after birth?│
+│               │                          │ (slope=gene 11).  │ and cell memory.     │             │
+└───────────────┴──────────────────────────┴───────────────────┴──────────────────────┴─────────────┘
+     Always           Non-autonomous:             Non-autonomous:       Non-autonomous:       Non-auto:
+     per-cell         from global config          from global config    from global config    from config
+                      Autonomous (U on):          Autonomous (U on):    Autonomous (U on):    Autonomous:
+                      evolved per-cell             evolved per-cell      evolved per-cell     evolved
 ```
 
 **Reading the chromosome:** Gene 0 (leftmost) through gene 13 (rightmost). Breeding genes are always per-cell. Genes 3–13 can be globally configured (U off) or independently evolved (U on). In autonomous mode, offspring inherit genes from two parents via crossover, with germline mutation controlled by gene 3.
@@ -165,6 +167,8 @@ Every cell carries a single chromosome of 14 genes, organized in four functional
 **Genes 9–11 (Learning Dynamics):** Control how each cell learns. Gene 9 (Learning Rate) is the single most impactful gene — in autonomous mode, evolution can discover that deep-layer cells should learn slowly while output cells learn fast. **Gene 11 (Activation Slope)** is the cell's response curve — it sets the leaky ReLU negative slope, controlling how much negative signal passes through. Low slope (0.01) = highly selective, suppresses negative signals; high slope (0.3) = permissive, passes more signal through. It is a gene (fixed at birth), not a protein, because it defines what *type* of neuron this is — analogous to which ion channels the cell expresses during development.
 
 **Genes 12–13 (Pruning Sensitivity):** These genes put pruning thresholds *inside* the cell. In non-autonomous mode, all cells share the same global values from config. In autonomous mode, each cell evolves its own sensitivity — cells can become more or less resilient to pruning pressure through natural selection. This is analogous to cells expressing different levels of trophic factor receptors: a cell with a low MCS (gene 13) is "easy to satisfy" and survives with minimal contribution, while a cell with a high MCS is under stronger pressure to contribute or die.
+
+**Gene 14 (Immune Period):** Every newborn cell gets an **immune period** — a number of backprop passes during which it cannot be killed by any pruning strategy (P, O, Y, Z, or percentile). The gene sets the duration (2–15 backprop passes), and the protein `backprops_remaining` counts down from that value. Once `backprops_remaining` reaches 0, the cell becomes eligible for pruning like any other. In autonomous mode, cells with longer immune periods have more time to learn and integrate into the network but also occupy resources longer if they turn out to be useless. Evolution balances this tradeoff. This is analogous to the neonatal period in biology where immature neurons are protected from apoptosis while they migrate and form synapses.
 
 ### Gene 4 (Dendrite Size) Detail
 
@@ -261,6 +265,7 @@ The `U` key toggles `autonomous_network_genes`:
 | 11 (activation slope) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: uniform(0.01, 0.3) |
 | 12 (weight prune threshold) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−3,−1.5) → 0.001–0.032 |
 | 13 (min contribution score) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−6,−2) |
+| 14 (immune period) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: integer 2–15 |
 
 **Key difference:** With U off, changing a parameter via **E**, **I**, or **C** takes effect **immediately** on every cell — the config value is read fresh each forward/backward pass and each pruning check. With U on, each cell uses its own gene allele; the only way to change it is through **evolution** (birth with new genes) or **X** (re-init from config).
 
@@ -589,8 +594,8 @@ All screens include footnotes explaining when metrics are measured (snapshot vs 
 | Feature | Details |
 |---------|---------|
 | **Full neural-network training** | Forward pass, backpropagation, weight/bias updates, cross-entropy loss |
-| **14 heritable genes** | All 14 genes (breeding, network, learning, pruning) with autonomous/non-autonomous modes |
-| **5 pruning strategies** | Charge-delta (**P**), gradient (**O**), weight-magnitude (**Y**), contribution-score (**Z**), and percentile (auto) — thresholds via **C** key |
+| **15 heritable genes** | All 15 genes (breeding, network, learning, pruning, immunity) with autonomous/non-autonomous modes |
+| **5 pruning strategies + immunity** | Charge-delta (**P**), gradient (**O**), weight-magnitude (**Y**), contribution-score (**Z**), and percentile (auto) — thresholds via **C** key. Gene 14 gives newborn cells a grace period. |
 | **Epoch-based training loop** | One epoch = one full pass over all loaded samples; epochs are counted and displayed in the status bar |
 | **Minibatch gradient accumulation** | Configurable batch size **K** (key **K**); gradients accumulate over K samples before one weight update |
 | **Epoch shuffling** | Training samples are Fisher-Yates shuffled at the start of each epoch |

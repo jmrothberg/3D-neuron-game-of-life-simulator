@@ -8,7 +8,7 @@ copy/paste only — it is not imported by the build script.
 def get_defs():
      
     jmr_defs = """
-    THE 14 GENES  (inherited, mostly stable — the cell's genotype)
+    THE 15 GENES  (inherited, mostly stable — the cell's genotype)
 
     ── Breeding Genes (always per-cell) ──────────────────────────────────────
     Gene 0  Overcrowding Tolerance (OT)   Max neighbors before death. OT=3 → dies if >3 neighbors.
@@ -35,16 +35,21 @@ def get_defs():
     Gene 12 Weight Prune Threshold (WPT)   Min max-|weight| to survive. Log-uniform 1e-3 to 1e-1.
     Gene 13 Min Contribution Score (MCS)   Min contribution score to survive. Log-uniform 1e-6 to 1e-2.
             Contribution score = max(charge_diff_fwd, charge_diff_rev) × avg |gradient|.
+
+    ── Immunity Gene ───────────────────────────────────────────────────────
+    Gene 14 Immune Period (IP)             Backprop passes before cell is prunable. Integer 2–15.
+            Newborn cells are protected from ALL pruning until backprops_remaining counts to 0.
     """
 
     jmr_defs2 = """
-    THE 5 PROTEINS  (dynamic, change every training step — the cell's phenotype)
+    THE 6 PROTEINS  (dynamic, change every training step — the cell's phenotype)
 
     Charge     Activation signal.   Forward: leaky_ReLU(bias + Σ(upstream_charge × weight)).  Range [−10, 10].
     Error      Backprop signal.     Backward: accumulated from downstream errors × reversed weights.
     Bias       Baseline offset.     Updated each step: bias -= lr × error.  Initialized near 0.
     Weights    Synaptic strengths.  He-init: randn × √(2/fan_in).  Update: w -= lr × grad + decay × w.
     Gradient   Learning signal.     gradient = error × upstream_charge, clipped.
+    backprops_remaining  Immune countdown. Init from gene 14. Decrements each backprop pass. While > 0, cell is immune to pruning.
 
     THE 6 CELL MEMORY FIELDS  (rolling statistics, stored in the cell, used for pruning)
 

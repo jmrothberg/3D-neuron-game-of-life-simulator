@@ -21,7 +21,7 @@
 
   /* Expand compact training sample {c:[784 charges], l:label} into {layer0, layerLast} cell-JSON grids.
      Compact format written by mnist_to_neurosim_web_json.py v2 — ~100x smaller than full cell objects. */
-  const _COMPACT_GENES = [15,2,3,10, 9,0.01,5,0.001,1e-6, 0.01,1e-7,0.1, 0.01,0];
+  const _COMPACT_GENES = [15,2,3,10, 9,0.01,5,0.001,1e-6, 0.01,1e-7,0.1, 0.01,0, 5];
   function _compactCell(layer, x, y, charge) {
     return {x:x, y:y, layer:layer, genes:_COMPACT_GENES, weights:[0,0,0,0,0,0,0,0,0],
       bias:0, charge:charge, error:EPS, gradient:0, reach:1,
@@ -126,6 +126,8 @@
       min_contribution_score: 0,
       /* Percentile pruning: kill bottom N% of cells by contribution score each epoch (0 = off, e.g. 10 = bottom 10%) */
       prune_percentile: 0,
+      /* Immune period: number of backprop passes a newborn cell survives before becoming prunable (gene 14) */
+      immune_period: 5,
     };
     c.updateDerived = function () {
       this.weight_matrix = 2 * this.length_of_dendrite + 1;
@@ -329,9 +331,9 @@
       this.contributionScore = 0;
     }
     initalizeAllGenes() {
-      this.genes = new Array(14).fill(0);
-      this.colors = new Array(14).fill(0);
-      this.protein_colors = new Array(14).fill(0);
+      this.genes = new Array(15).fill(0);
+      this.colors = new Array(15).fill(0);
+      this.protein_colors = new Array(15).fill(0);
     }
     initalizeBreedingGenes() {
       const cfg = CellConfig;
@@ -350,6 +352,7 @@
         this.genes[11] = cfg ? cfg.activation_slope : 0.01;
         this.genes[12] = cfg ? cfg.weight_prune_threshold : 0.01;
         this.genes[13] = cfg ? cfg.min_contribution_score : 0;
+        this.genes[14] = cfg ? cfg.immune_period : 5;
       } else {
         this.genes[3] = randInt(0, 99);
         this.genes[4] = Math.pow(randInt(1, 3) * 2 + 1, 2);
@@ -366,11 +369,13 @@
         this.genes[11] = uniform(0.01, 0.3);
         this.genes[12] = Math.pow(10, uniform(-3, -1.5));
         this.genes[13] = Math.pow(10, uniform(-6, -2));
+        this.genes[14] = randInt(2, 15);
       }
       this.colorGenes();
     }
     initializeNetworkProteins() {
       this.charge = 0; this.gradient = 0; this.error = EPS;
+      this.backprops_remaining = this.genes[14] | 0;
       this.reach = ((Math.sqrt(this.genes[4]) | 0) - 1) >> 1;
       const fan = Math.max(this.genes[6], 1), n = this.genes[4] | 0;
       const sc = Math.sqrt(2 / (fan + 1e-8));
@@ -406,7 +411,9 @@
       /* gene 13: min contribution score (log scale ~1e-6..1e-2) */
       const g13v = clip(this.genes[13], 1e-6, 1e-2);
       const s13 = clip((((log10(g13v) + 6) / 4) * 255) | 0, 0, 255);
-      colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0], [s12, s12, 0], [0, s13, s13]);
+      /* gene 14: immune period (integer 2..15) */
+      const s14 = clip((((this.genes[14] - 2) / 13) * 255) | 0, 0, 255);
+      colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0], [s12, s12, 0], [0, s13, s13], [s14, 0, s14]);
       this.colors = colors;
     }
     colorProteins() {
@@ -713,8 +720,11 @@
       const up = this.getUpperLayerCells(cellsArr, reach);
       if (accumulateOnly) this.accumulateWeightGradients(up, reach);
       else this.updateWeightsAndBias(up, lrn, reach, wd);
+      if (this.backprops_remaining > 0) this.backprops_remaining--;
     }
     shouldDie(chargePrune, gradPrune, weightMagPrune, contribPrune, pl) {
+      /* Gene 14 immunity: newborn cells are protected until they've had enough backprop passes */
+      if (this.backprops_remaining > 0) return false;
       const cfg = CellConfig;
       /* Gradient prune (O key): compare avg_gradient_magnitude against threshold */
       if (gradPrune) {
@@ -772,7 +782,7 @@
         max_charge_diff_forward:this.max_charge_diff_forward,max_charge_diff_reverse:this.max_charge_diff_reverse,
         significant_charge_change_forward:this.significant_charge_change_forward,significant_charge_change_reverse:this.significant_charge_change_reverse,
         gradient_history:this.gradient_history.slice(),avg_gradient_magnitude:this.avg_gradient_magnitude,significant_gradient_change:this.significant_gradient_change,
-        contributionScore:this.contributionScore,
+        contributionScore:this.contributionScore, backprops_remaining:this.backprops_remaining,
       };
     }
     static fromJSON(j) {
@@ -784,16 +794,18 @@
       c.significant_charge_change_forward=!!j.significant_charge_change_forward;c.significant_charge_change_reverse=!!j.significant_charge_change_reverse;
       c.gradient_history=(j.gradient_history||[]).slice();c.avg_gradient_magnitude=j.avg_gradient_magnitude||0;c.significant_gradient_change=!!j.significant_gradient_change;
       c.contributionScore=j.contributionScore||0;
-      /* backward-compat: old saves had 12 genes, pad to 14 with defaults */
+      c.backprops_remaining=j.backprops_remaining||0;
+      /* backward-compat: old saves may have 12-14 genes, pad to 15 */
       while (c.genes.length < 14) c.genes.push(c.genes.length === 12 ? 0.01 : 0);
-      c.colors=new Array(14).fill(0);c.protein_colors=new Array(14).fill(0);c.colorGenes();c.colorProteins();
+      if (c.genes.length < 15) c.genes.push(5);
+      c.colors=new Array(15).fill(0);c.protein_colors=new Array(15).fill(0);c.colorGenes();c.colorProteins();
       return c;
     }
     clone() { return Cell.fromJSON(this.toJSON()); }
     toString() {
       let g911 = '';
       if (this.genes.length >= 12) g911 = `  LR=${this.genes[9].toFixed(4)}, GT=${this.genes[10].toExponential(2)}, AS=${this.genes[11].toFixed(2)}\n`;
-      if (this.genes.length >= 14) g911 += `  WPT=${this.genes[12].toExponential(2)}, MCS=${this.genes[13].toExponential(2)}\n`;
+      if (this.genes.length >= 15) g911 += `  WPT=${this.genes[12].toExponential(2)}, MCS=${this.genes[13].toExponential(2)}, IP=${this.genes[14]}\n`;
       const w = []; for (let i = 0; i < this.weights.length; i++) { if (i && i % 7 === 0) w.push('\n'); w.push(this.weights[i].toFixed(4)); }
       return `Neuron: layer=${this.layer} x=${this.x} y=${this.y}\n` +
         `Genes (breeding):\n  OT=${this.genes[0]}, IT=${this.genes[1]}, BT=${this.genes[2]}, MR=${this.genes[3]}\n` +
@@ -1067,7 +1079,7 @@
     for (let z = 1; z < nl - 1; z++)
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
         const c = state.cells[x][y][z];
-        if (c) scored.push({ x, y, z, score: c.contributionScore });
+        if (c && c.backprops_remaining <= 0) scored.push({ x, y, z, score: c.contributionScore });
       }
     if (scored.length === 0) return 0;
     scored.sort((a, b) => a.score - b.score);
@@ -1530,6 +1542,7 @@
  Activation Slope:    ${config.activation_slope}
  Weight Prune Thresh: ${vs(config.weight_prune_threshold, sug ? sug.weight_prune_threshold : undefined)}  [gene 12]
  Min Contrib Score:   ${config.min_contribution_score}  (0=off, charge_diff×gradient)  [gene 13]
+ Immune Period:       ${config.immune_period} backprops  (newborn protection)  [gene 14]
  Prune Percentile:    ${config.prune_percentile}%  (0=off, bottom N% killed each epoch)
 
 ══════ TRAINING CONFIG ══════
@@ -1557,11 +1570,12 @@
     /* Pruning readiness: show how many cells would survive/die at current settings */
     const nl = config.num_layers;
     const csScores = [];
-    let wouldDieCharge = 0, wouldDieGrad = 0, wouldDieWeight = 0, wouldDieCS = 0, totalH = 0;
+    let wouldDieCharge = 0, wouldDieGrad = 0, wouldDieWeight = 0, wouldDieCS = 0, totalH = 0, immuneCount = 0;
     for (let z = 1; z < nl - 1; z++)
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
         const c = state.cells[x][y][z]; if (!c) continue;
         totalH++;
+        if (c.backprops_remaining > 0) immuneCount++;
         csScores.push(c.contributionScore);
         const cd = config.autonomous_network_genes ? c.genes[7] : config.charge_delta;
         const fwd = c.max_charge_diff_forward > cd;
@@ -1583,7 +1597,8 @@
  Would die P (charge):  ${wouldDieCharge}/${totalH}  (${state.prune_logic}) ${state.prune ? '[ON]' : '[off]'}
  Would die O (gradient): ${wouldDieGrad}/${totalH} ${state.gradient_prune ? '[ON]' : '[off]'}
  Would die Y (weight):  ${wouldDieWeight}/${totalH} ${state.weight_mag_prune ? '[ON]' : '[off]'}
- Would die Z (contrib):  ${wouldDieCS}/${totalH} ${state.contrib_score_prune ? '[ON]' : '[off]'}`;
+ Would die Z (contrib):  ${wouldDieCS}/${totalH} ${state.contrib_score_prune ? '[ON]' : '[off]'}
+ Immune (newborn):      ${immuneCount}/${totalH}  (protected by gene 14)`;
       if (config.prune_percentile > 0) {
         const cutN = Math.max(1, Math.floor(totalH * config.prune_percentile / 100));
         out += `\n Percentile prune: bottom ${config.prune_percentile}% = ${cutN} cells`;
@@ -1609,9 +1624,11 @@
    • avg_gradient = mean |gradient| over last
      N samples
    • contributionScore = charge_diff × avg_grad
-  P/O pruning checks these rolling values each
+  P/O/Y/Z pruning checks these rolling values each
   evolution step. Cells only die after they've
   been consistently inactive across many samples.
+  Newborn cells are IMMUNE for gene 14 backprop
+  passes (protein: backprops_remaining counts down).
 ² Percentile pruning runs once at EPOCH BOUNDARY.
   Ranks all cells by contributionScore and kills
   the bottom N%. Set via C key.`;
@@ -1656,6 +1673,7 @@
       weight_prune_threshold: config.weight_prune_threshold,
       min_contribution_score: config.min_contribution_score,
       prune_percentile: config.prune_percentile,
+      immune_period: config.immune_period,
       epsilon: config.epsilon,
     };
   }
@@ -2623,6 +2641,7 @@
         config.charge_delta = +(await showModal(s('charge_delta', config.charge_delta, sug ? sug.charge_delta : undefined), sug ? sug.charge_delta : config.charge_delta) ?? config.charge_delta);
         config.gradient_threshold = +(await showModal(s('gradient_threshold', config.gradient_threshold, sug ? sug.gradient_threshold : undefined), sug ? sug.gradient_threshold : config.gradient_threshold) ?? config.gradient_threshold);
         config.activation_slope = +(await showModal(s('activation_slope', config.activation_slope, sug ? sug.activation_slope : undefined), config.activation_slope) ?? config.activation_slope);
+        config.immune_period = clip(+(await showModal('immune_period (2-15, backprops before cell can be pruned):', config.immune_period) ?? config.immune_period) | 0, 2, 15);
         config.updateDerived();
         /* Desktop neurosim/main.py: remap only when weight count (dendrite footprint) changes. */
         if (config.number_of_weights !== oldNumWeights) {
