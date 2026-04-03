@@ -117,8 +117,8 @@
       learning_rate: 0.01, bias_range: 0.01, avg_weights_cell: 5, weight_decay: 1e-5,
       charge_delta: 0.01, gradient_threshold: 1e-4, gradient_clip_range: 0.5,
       weight_change_threshold: 0.005, activation_slope: 0.01,
-      how_much_training_data: 20, start_index: 0, epsilon: EPS,
-      gradient_minibatch_size: 1,
+      how_much_training_data: 1000, start_index: 0, epsilon: EPS,
+      gradient_minibatch_size: 10,
       shuffle_epoch: true,
       /* Prune cells where max |weight| < this threshold (weight-magnitude pruning via O key combo) */
       weight_prune_threshold: 0.01,
