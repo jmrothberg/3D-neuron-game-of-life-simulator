@@ -37,8 +37,9 @@ def get_defs():
             Contribution score = max(charge_diff_fwd, charge_diff_rev) × avg |gradient|.
 
     ── Immunity Gene ───────────────────────────────────────────────────────
-    Gene 14 Immune Period (IP)             Backprop passes before cell is prunable. Integer 2–15.
+    Gene 14 Immune Period (IP)             Training cycles before cell is prunable. Integer 10–100.
             Newborn cells are protected from ALL pruning until backprops_remaining counts to 0.
+            Counter decrements each forward pass (training cycle), not just backprop.
     """
 
     jmr_defs2 = """
@@ -49,9 +50,9 @@ def get_defs():
     Bias       Baseline offset.     Updated each step: bias -= lr × error.  Initialized near 0.
     Weights    Synaptic strengths.  He-init: randn × √(2/fan_in).  Update: w -= lr × grad + decay × w.
     Gradient   Learning signal.     gradient = error × upstream_charge, clipped.
-    backprops_remaining  Immune countdown. Init from gene 14. Decrements each backprop pass. While > 0, cell is immune to pruning.
+    backprops_remaining  Immune countdown. Init from gene 14. Decrements each training cycle (forward pass). While > 0, cell is immune to pruning.
 
-    THE 6 CELL MEMORY FIELDS  (rolling statistics, stored in the cell, used for pruning)
+    THE 7 CELL MEMORY FIELDS  (rolling statistics, stored in the cell, used for pruning)
 
     max_charge_diff_forward    Max charge swing (max−min) across forward-pass samples.
     max_charge_diff_reverse    Max charge swing across reverse-pass samples.

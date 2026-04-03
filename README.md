@@ -1,6 +1,6 @@
 # JMR Genetic Game of Neural Network Life
 
-A bio-inspired neural network simulator where neurons are living cells with **14 genes**, **5 proteins**, and **6 cell-memory fields** that grow, connect, learn, and die on a 28×28 grid. Networks self-assemble through genetic rules, learn via backpropagation with weights stored *inside* each cell's dendrites, and are sculpted by environmental pruning — combining Conway's Game of Life mechanics with gradient descent.
+A bio-inspired neural network simulator where neurons are living cells with **15 genes**, **6 proteins**, and **7 cell-memory fields** that grow, connect, learn, and die on a 28×28 grid. Networks self-assemble through genetic rules, learn via backpropagation with weights stored *inside* each cell's dendrites, and are sculpted by environmental pruning — combining Conway's Game of Life mechanics with gradient descent.
 
 **100/100 on MNIST. 98/100 on Fashion-MNIST.**
 
@@ -39,9 +39,9 @@ This simulator: weights live **inside each cell's dendrites** — a flat 1D arra
 
 Every cell carries three types of information, inspired by molecular biology:
 
-- **Genes (14 values)** — inherited, stable parameters that define the cell's identity, structure, pruning sensitivity, and **how protein state is created and updated**. These are the cell's *genotype*.
-- **Proteins (5 values)** — dynamic *phenotype*: charge, error, bias, weights, gradient. Their **layout, initialization, and dynamics are gene-programmed**; their **numerical values change** every training step (see below).
-- **Cell Memory (6 fields)** — not a separate chemical layer: they are **integrative traces of what the charge and gradient proteins have been doing** over recent training (see below). Used for pruning and survival decisions.
+- **Genes (15 values)** — inherited, stable parameters that define the cell's identity, structure, pruning sensitivity, immunity, and **how protein state is created and updated**. These are the cell's *genotype*.
+- **Proteins (6 values)** — dynamic *phenotype*: charge, error, bias, weights, gradient, backprops_remaining. Their **layout, initialization, and dynamics are gene-programmed**; their **numerical values change** every training step (see below).
+- **Cell Memory (7 fields)** — not a separate chemical layer: they are **integrative traces of what the charge and gradient proteins have been doing** over recent training (see below). Used for pruning and survival decisions.
 
 ### How genes specify proteins (expression, updates, and cutoffs)
 
@@ -75,13 +75,13 @@ Together, **weights** and **bias** are where the network’s **learned mapping**
 | **Charge** | Current activation after forward pass — a **snapshot**, overwritten on the next image. | 0 (hidden/output); random (input) | Hard-clipped [−10, 10]; typically −1 to 1 after leaky ReLU |
 | **Error** | Current backprop signal for this step. | ε (1e-15) | Hard-clipped [−10, 10]; typically small |
 | **Gradient** | Immediate direction of plasticity for each weight slot this step. | 0 | Clipped to ±gradient_clip (default ±0.5) |
-| **backprops_remaining** | Immune countdown — decremented each backprop pass. While > 0, cell is protected from all pruning. | gene 14 (2–15) | Counts down to 0, then stays at 0 |
+| **backprops_remaining** | Immune countdown — decremented each training cycle (forward pass). While > 0, cell is protected from all pruning. | gene 14 (10–100) | Counts down to 0, then stays at 0 |
 
 These are essential for learning, but they are **not** where the cell keeps a running record of the whole epoch by themselves.
 
-**3. Integrative “memory” — the six fields as traces of protein activity**
+**3. Integrative “memory” — the seven fields as traces of protein activity**
 
-The **six cell-memory fields** are **not** extra proteins in the table above. In biological terms, think of them as **activity-dependent integration** on top of the same phenotype: the cell **watches its own charge and gradient proteins over time** and updates rolling summaries.
+The **seven cell-memory fields** are **not** extra proteins in the table above. In biological terms, think of them as **activity-dependent integration** on top of the same phenotype: the cell **watches its own charge and gradient proteins over time** and updates rolling summaries.
 
 | Cell memory field | Built from which proteins / behavior |
 |-------------------|--------------------------------------|
@@ -90,7 +90,7 @@ The **six cell-memory fields** are **not** extra proteins in the table above. In
 | **contributionScore** | Combines charge-diff traces × average gradient magnitude (“active” × “learning”). |
 | **significant_charge_change_*** / **significant_gradient_change** | Sticky flags: “has **charge-** or **gradient**-related behavior ever crossed a threshold?” — like a long-lived mark once a pathway has been strongly engaged; used for Conway-style protection, not for the numeric pruning averages. |
 
-So: **weights and bias** store **what was learned**; **charge, error, gradient** carry **what is happening now**; the **six memory fields** store **compressed history of charge and gradient dynamics** for pruning and scoring — conceptually aligned with **post-translational, experience-dependent state** without ever editing the genome.
+So: **weights and bias** store **what was learned**; **charge, error, gradient** carry **what is happening now**; the **seven memory fields** store **compressed history of charge and gradient dynamics** for pruning and scoring — conceptually aligned with **post-translational, experience-dependent state** without ever editing the genome.
 
 ---
 
@@ -126,7 +126,7 @@ Genes 12–13 control **pruning sensitivity**.
 | **11** | Activation Slope | AS | uniform(0.01, 0.3) | config (0.01) | Leaky ReLU: if pre-activation ≤ 0, charge = AS × pre-activation → **shapes the charge protein** | Ion-channel selectivity |
 | **12** | Weight Prune Thresh | WPT | 10^uniform(−3,−1.5) → 0.001 … 0.032 | config (0.01) | Pruning: cell dies if max \|weight protein\| < WPT. Range capped below He-init scale so cells aren't born dead. | Synaptic maintenance threshold |
 | **13** | Min Contribution | MCS | 10^uniform(−6,−2) → 1e-6 … 0.01 | config (0, off) | Pruning: cell dies if contributionScore < MCS (score = charge_diff × gradient) | Activity-dependent trophic need |
-| **14** | Immune Period | IP | integer 2–15 | config (5) | Newborn cell is **protected from all pruning** for IP backprop passes. Protein `backprops_remaining` counts down to 0. | Neonatal immune period |
+| **14** | Immune Period | IP | integer 10–100 | config (50) | Newborn cell is **protected from all pruning** for IP training cycles (forward passes). Protein `backprops_remaining` counts down each forward pass. | Neonatal immune period |
 
 **How to read this table:** The "allele range" column shows the space of possible values a gene can take in autonomous mode. The "what the allele controls" column shows exactly which **protein or decision** the allele value feeds into at runtime — this is the gene→protein link.
 
@@ -168,7 +168,7 @@ Every cell carries a single chromosome of 15 genes, organized in five functional
 
 **Genes 12–13 (Pruning Sensitivity):** These genes put pruning thresholds *inside* the cell. In non-autonomous mode, all cells share the same global values from config. In autonomous mode, each cell evolves its own sensitivity — cells can become more or less resilient to pruning pressure through natural selection. This is analogous to cells expressing different levels of trophic factor receptors: a cell with a low MCS (gene 13) is "easy to satisfy" and survives with minimal contribution, while a cell with a high MCS is under stronger pressure to contribute or die.
 
-**Gene 14 (Immune Period):** Every newborn cell gets an **immune period** — a number of backprop passes during which it cannot be killed by any pruning strategy (P, O, Y, Z, or percentile). The gene sets the duration (2–15 backprop passes), and the protein `backprops_remaining` counts down from that value. Once `backprops_remaining` reaches 0, the cell becomes eligible for pruning like any other. In autonomous mode, cells with longer immune periods have more time to learn and integrate into the network but also occupy resources longer if they turn out to be useless. Evolution balances this tradeoff. This is analogous to the neonatal period in biology where immature neurons are protected from apoptosis while they migrate and form synapses.
+**Gene 14 (Immune Period):** Every newborn cell gets an **immune period** — a number of training cycles (forward passes) during which it cannot be killed by any pruning strategy (P, O, Y, Z, or percentile). The gene sets the duration (10–100 training cycles), and the protein `backprops_remaining` counts down from that value. Once `backprops_remaining` reaches 0, the cell becomes eligible for pruning like any other. In autonomous mode, cells with longer immune periods have more time to learn and integrate into the network but also occupy resources longer if they turn out to be useless. Evolution balances this tradeoff. This is analogous to the neonatal period in biology where immature neurons are protected from apoptosis while they migrate and form synapses.
 
 ### Gene 4 (Dendrite Size) Detail
 
@@ -187,7 +187,7 @@ Genes 7, 8, 10, 12, and 13 span multiple orders of magnitude. If you use a unifo
 
 ---
 
-### The 5 Proteins
+### The 6 Proteins
 
 These are the cell's *expressed behavior*: their **existence and update laws** come from **genes** (above); the **numbers in the table below** change every forward/backward pass as training runs.
 
@@ -198,12 +198,13 @@ These are the cell's *expressed behavior*: their **existence and update laws** c
 | **Bias** | — | Baseline offset before activation | `bias -= lr × error` each backward step | Initialized near 0 | Resting membrane potential |
 | **Weights** | — | Synaptic connection strengths (1D array, size = gene 4) | He-init: `randn × √(2/fan_in)`. Update: `w -= lr × gradient + decay × w` | Unconstrained | Synaptic receptor density |
 | **Gradient** | — | Most recent learning signal | `error × upstream_charge`, clipped to [−clip, +clip] | [−clip, clip] | Calcium/CaMKII activity level |
+| **backprops_remaining** | — | Immune countdown (gene 14) | Init from gene 14; decrements each training cycle. While > 0, cell is immune to all pruning. | 0 to gene 14 value | Neonatal immune period |
 
 ---
 
-### The 6 Cell Memory Fields
+### The 7 Cell Memory Fields
 
-These fields are the **integrative traces** described in **Memory: which proteins store what** — summaries of **charge** and **gradient** over time, not extra named proteins in the five-protein list. All pruning decisions read from them; the cell carries its own recent history of activity and plasticity.
+These fields are the **integrative traces** described in **Memory: which proteins store what** — summaries of **charge** and **gradient** over time, not extra named proteins in the six-protein list. All pruning decisions read from them; the cell carries its own recent history of activity and plasticity.
 
 | Field | What It Tracks | How It's Updated | Used By |
 |-------|---------------|-----------------|---------|
@@ -213,8 +214,7 @@ These fields are the **integrative traces** described in **Memory: which protein
 | **contributionScore** | Combined activity + learning signal | `max(max_charge_diff_fwd, max_charge_diff_rev) × avg_gradient_magnitude` | Contribution-score pruning (gene 13), percentile pruning, 3D color mode |
 | **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > threshold`, never cleared (until explicit reset) | Conway death protection only (shouldDieGenetic) |
 | **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
-
-The implementation also keeps **significant_gradient_change** — a sticky flag set when **avg_gradient_magnitude** crosses the gradient threshold (gene 10), Conway death protection only, parallel to the charge stickies.
+| **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set to `true` when `avg_gradient_magnitude > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
 
 **Key design principle:** All rolling metrics (`max_charge_diff_*`, `avg_gradient_magnitude`, `contributionScore`) are *live* — they reflect recent training and are used for pruning decisions. The *sticky* flags (`significant_charge_change_*`, `significant_gradient_change`) are only used to protect cells from Conway-style genetic death, ensuring that cells that have ever contributed are not killed by overcrowding/isolation rules.
 
@@ -265,7 +265,7 @@ The `U` key toggles `autonomous_network_genes`:
 | 11 (activation slope) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: uniform(0.01, 0.3) |
 | 12 (weight prune threshold) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−3,−1.5) → 0.001–0.032 |
 | 13 (min contribution score) | **Config value at runtime** (C changes apply immediately) | Per-cell gene: 10^uniform(−6,−2) |
-| 14 (immune period) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: integer 2–15 |
+| 14 (immune period) | **Config value at runtime** (E changes apply immediately) | Per-cell gene: integer 10–100 |
 
 **Key difference:** With U off, changing a parameter via **E**, **I**, or **C** takes effect **immediately** on every cell — the config value is read fresh each forward/backward pass and each pruning check. With U on, each cell uses its own gene allele; the only way to change it is through **evolution** (birth with new genes) or **X** (re-init from config).
 

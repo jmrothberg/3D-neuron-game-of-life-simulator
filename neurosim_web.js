@@ -14,14 +14,14 @@
   const ARRAY_LAYERS = 16;
   /* Y-axis max defaults; sliders let user zoom in/out on the loss scale. */
   const PLOT_YMAX_MIN = 0.1;
-  const PLOT_YMAX_MAX = 20;
+  const PLOT_YMAX_MAX = 30;
   const FASHION_LABELS = '0 T-shirt/top | 1 Trouser | 2 Pullover | 3 Dress | 4 Coat | 5 Sandal | 6 Shirt | 7 Sneaker | 8 Bag | 9 Ankle boot';
   const WEIGHT_DRAW_THRESHOLD = 0.01;
   const EPS = 1e-8;
 
   /* Expand compact training sample {c:[784 charges], l:label} into {layer0, layerLast} cell-JSON grids.
      Compact format written by mnist_to_neurosim_web_json.py v2 — ~100x smaller than full cell objects. */
-  const _COMPACT_GENES = [15,2,3,10, 9,0.01,5,0.001,1e-6, 0.01,1e-7,0.1, 0.01,0, 5];
+  const _COMPACT_GENES = [15,2,3,10, 9,0.01,5,0.001,1e-6, 0.01,1e-7,0.1, 0.01,0, 50];
   function _compactCell(layer, x, y, charge) {
     return {x:x, y:y, layer:layer, genes:_COMPACT_GENES, weights:[0,0,0,0,0,0,0,0,0],
       bias:0, charge:charge, error:EPS, gradient:0, reach:1,
@@ -126,8 +126,8 @@
       min_contribution_score: 0,
       /* Percentile pruning: kill bottom N% of cells by contribution score each epoch (0 = off, e.g. 10 = bottom 10%) */
       prune_percentile: 0,
-      /* Immune period: number of backprop passes a newborn cell survives before becoming prunable (gene 14) */
-      immune_period: 5,
+      /* Immune period: number of training cycles (forward passes) a newborn cell survives before becoming prunable (gene 14) */
+      immune_period: 50,
     };
     c.updateDerived = function () {
       this.weight_matrix = 2 * this.length_of_dendrite + 1;
@@ -266,7 +266,7 @@
       minibatchLossPoints: [], epochLossPoints: [], epochs: 1, batch_size: 1,
       _batch_loss_sum: 0, _batch_sample_count: 0,
       _mini_loss_sum: 0, _mini_n: 0,
-      plotEpochYmax: 10, plotMinibatchYmax: 10,
+      plotEpochYmax: 25, plotMinibatchYmax: 25,
       training_data_layer_0: [], training_data_num_layer_minus_1: [],
       /* M=MNIST F=Fashion S=synthetic U=unknown file X=no training data loaded — used in save filenames */
       training_dataset_code: 'X',
@@ -352,7 +352,7 @@
         this.genes[11] = cfg ? cfg.activation_slope : 0.01;
         this.genes[12] = cfg ? cfg.weight_prune_threshold : 0.01;
         this.genes[13] = cfg ? cfg.min_contribution_score : 0;
-        this.genes[14] = cfg ? cfg.immune_period : 5;
+        this.genes[14] = cfg ? cfg.immune_period : 50;
       } else {
         this.genes[3] = randInt(0, 99);
         this.genes[4] = Math.pow(randInt(1, 3) * 2 + 1, 2);
@@ -369,7 +369,7 @@
         this.genes[11] = uniform(0.01, 0.3);
         this.genes[12] = Math.pow(10, uniform(-3, -1.5));
         this.genes[13] = Math.pow(10, uniform(-6, -2));
-        this.genes[14] = randInt(2, 15);
+        this.genes[14] = randInt(10, 100);
       }
       this.colorGenes();
     }
@@ -411,8 +411,8 @@
       /* gene 13: min contribution score (log scale ~1e-6..1e-2) */
       const g13v = clip(this.genes[13], 1e-6, 1e-2);
       const s13 = clip((((log10(g13v) + 6) / 4) * 255) | 0, 0, 255);
-      /* gene 14: immune period (integer 2..15) */
-      const s14 = clip((((this.genes[14] - 2) / 13) * 255) | 0, 0, 255);
+      /* gene 14: immune period (integer 10..100) */
+      const s14 = clip((((this.genes[14] - 10) / 90) * 255) | 0, 0, 255);
       colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0], [s12, s12, 0], [0, s13, s13], [s14, 0, s14]);
       this.colors = colors;
     }
@@ -704,6 +704,7 @@
       this.computeTotalCharge(up, reach);
       this.charge = this.relu(this.charge);
       this.updateCharge(this.charge, 'forward');
+      if (this.backprops_remaining > 0) this.backprops_remaining--;
     }
     backward(cellsArr, lr, maxBelow, accumulateOnly) {
       const cfg = CellConfig;
@@ -711,8 +712,19 @@
       const reach = (cfg && cfg.autonomous_network_genes) ? this.reach : cfg.length_of_dendrite;
       const wd = (cfg && cfg.autonomous_network_genes) ? this.genes[8] : cfg.weight_decay;
       if (this.layer === cfg.num_layers - 2) {
-        const t = cellsArr[this.x][this.y][cfg.num_layers - 1];
-        this.computeErrorSignal(t ? t.charge : null, null, null);
+        /* Last hidden layer: sum error from ALL output cells within reach,
+           not just the one at the same (x,y). Fixes pruning bug where cells
+           at positions without an output cell got error=EPS (zero gradient). */
+        let es = EPS;
+        const outZ = cfg.num_layers - 1;
+        for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
+          const nx = this.x + dx, ny = this.y + dy;
+          if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+            const t = cellsArr[nx][ny][outZ];
+            if (t) es += (this.charge - t.charge) * this.reluDerivative(this.charge);
+          }
+        }
+        this.error = clip(es, -10, 10);
       } else {
         const below = this.getLayerBelowCells(cellsArr, reach, maxBelow);
         this.computeErrorSignal(null, below, reach);
@@ -720,7 +732,6 @@
       const up = this.getUpperLayerCells(cellsArr, reach);
       if (accumulateOnly) this.accumulateWeightGradients(up, reach);
       else this.updateWeightsAndBias(up, lrn, reach, wd);
-      if (this.backprops_remaining > 0) this.backprops_remaining--;
     }
     shouldDie(chargePrune, gradPrune, weightMagPrune, contribPrune, pl) {
       /* Gene 14 immunity: newborn cells are protected until they've had enough backprop passes */
@@ -797,7 +808,7 @@
       c.backprops_remaining=j.backprops_remaining||0;
       /* backward-compat: old saves may have 12-14 genes, pad to 15 */
       while (c.genes.length < 14) c.genes.push(c.genes.length === 12 ? 0.01 : 0);
-      if (c.genes.length < 15) c.genes.push(5);
+      if (c.genes.length < 15) c.genes.push(50);
       c.colors=new Array(15).fill(0);c.protein_colors=new Array(15).fill(0);c.colorGenes();c.colorProteins();
       return c;
     }
@@ -1301,7 +1312,7 @@
     }
     const out = [];
     out.push(`═══ Network Averages ═══`);
-    out.push(`Predictions: ${state.total_predictions} | Avg Loss: ${state.running_avg_loss.toExponential(4)}`);
+    out.push(`Predictions: ${state.total_predictions} | Avg Loss: ${state.running_avg_loss.toFixed(2)}`);
     out.push(`Active Cells: ${activeCells}/${tcells}`);
     out.push('');
     for (let z = 1; z < nl - 1; z++) {
@@ -1338,7 +1349,7 @@
     const n = arr.length;
     /* Y-axis label + latest value */
     ctx.fillStyle = '#888'; ctx.font = '10px monospace';
-    const latest = n > 0 ? arr[n - 1].toFixed(4) : '--';
+    const latest = n > 0 ? arr[n - 1].toFixed(2) : '--';
     ctx.fillText(label + '  Y:0-' + ymax.toFixed(0) + '  last=' + latest, margin + 2, 10);
     if (n === 0) return;
     const usable = H - 2 * margin;
@@ -1452,7 +1463,7 @@
     const s = [];
     s.push(`═══ Training Stats (Epoch ${state.training_cycles}) ═══`);
     s.push(`Accuracy: ${state.bingo_count}/${CellConfig.how_much_training_data} (Max: ${state.max_bingo_count})`);
-    const lastEL = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(4) : '--';
+    const lastEL = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(2) : '--';
     s.push(`Epoch Loss: ${lastEL}  |  Cells: ${b.totalCells} (${b.totalActive} active)`);
     s.push(`Avg Fan-In: ${b.avgFanIn.toFixed(1)}  |  Silent¹: ${b.totalDeadNeurons}`);
     s.push(`Weight Util: ${b.weightUtil.toFixed(1)}%  |  Avg|W|: ${b.avgWeightMag.toFixed(4)}`);
@@ -1627,8 +1638,9 @@
   P/O/Y/Z pruning checks these rolling values each
   evolution step. Cells only die after they've
   been consistently inactive across many samples.
-  Newborn cells are IMMUNE for gene 14 backprop
-  passes (protein: backprops_remaining counts down).
+  Newborn cells are IMMUNE for gene 14 training
+  cycles (protein: backprops_remaining counts down
+  each forward pass, not just backprop).
 ² Percentile pruning runs once at EPOCH BOUNDARY.
   Ranks all cells by contributionScore and kills
   the bottom N%. Set via C key.`;
@@ -2008,7 +2020,7 @@
     hud.textContent = [
       `Layers: ${config.num_layers} | Cells: ${g3.nIn + g3.nHid + g3.nOut} | Color: ${_3D_COLOR_MODE_NAMES[state._3d_color_mode]} (G=cycle)`,
       `Epoch: ${state.training_cycles} | Correct: ${state.bingo_count}/${config.how_much_training_data} | Max: ${state.max_bingo_count}`,
-      `Loss: ${state.running_avg_loss.toFixed(4)} | LR: ${config.learning_rate} | Dendrite: ${config.length_of_dendrite}`,
+      `Loss: ${state.running_avg_loss.toFixed(2)} | LR: ${config.learning_rate} | Dendrite: ${config.length_of_dendrite}`,
       `Train: ${state.training_mode} | BackProp: ${state.back_prop} | Prune: P=${state.prune} O=${state.gradient_prune} Y=${state.weight_mag_prune} Z=${state.contrib_score_prune}`,
     ].join('\n');
   }
@@ -2641,7 +2653,7 @@
         config.charge_delta = +(await showModal(s('charge_delta', config.charge_delta, sug ? sug.charge_delta : undefined), sug ? sug.charge_delta : config.charge_delta) ?? config.charge_delta);
         config.gradient_threshold = +(await showModal(s('gradient_threshold', config.gradient_threshold, sug ? sug.gradient_threshold : undefined), sug ? sug.gradient_threshold : config.gradient_threshold) ?? config.gradient_threshold);
         config.activation_slope = +(await showModal(s('activation_slope', config.activation_slope, sug ? sug.activation_slope : undefined), config.activation_slope) ?? config.activation_slope);
-        config.immune_period = clip(+(await showModal('immune_period (2-15, backprops before cell can be pruned):', config.immune_period) ?? config.immune_period) | 0, 2, 15);
+        config.immune_period = clip(+(await showModal('immune_period (10-100, training cycles before cell can be pruned):', config.immune_period) ?? config.immune_period) | 0, 10, 100);
         config.updateDerived();
         /* Desktop neurosim/main.py: remap only when weight count (dendrite footprint) changes. */
         if (config.number_of_weights !== oldNumWeights) {
@@ -2818,8 +2830,8 @@
       startT = now;
       const col = state.running ? '#0f0' : '#fff';
       /* Per-epoch and per-minibatch loss for status bar */
-      const lastEpochLoss = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(4) : '--';
-      const lastMinibatchLoss = state.minibatchLossPoints.length ? state.minibatchLossPoints[state.minibatchLossPoints.length - 1].toFixed(4) : '--';
+      const lastEpochLoss = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(2) : '--';
+      const lastMinibatchLoss = state.minibatchLossPoints.length ? state.minibatchLossPoints[state.minibatchLossPoints.length - 1].toFixed(2) : '--';
       const epochProgress = state.training_mode && state._training_sample_i != null
         ? ` (${state._training_sample_i}/${config.how_much_training_data})`
         : '';
