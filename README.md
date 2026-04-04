@@ -235,11 +235,11 @@ These are NOT separate from proteins. They ARE proteins — built by the cell wa
 | **max_charge_diff_reverse** | Max charge swing across reverse-pass samples | Each reverse pass: push charge, track running max − min | Activity pruning (P key), contribution score |
 | **avg_gradient_magnitude** | Rolling average of \|gradient\| over recent samples | Each backward pass: push \|gradient\| to history window (size = training data count), compute mean | Gradient pruning (O key), contribution score |
 | **contributionScore** | Combined activity + learning signal | `avg_gradient_magnitude × (1 + max(charge_diff_fwd, charge_diff_rev))` — gradient is the baseline; charge variability is a bonus | Contribution-score pruning (Z key), percentile pruning, 3D color mode |
-| **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > threshold`, never cleared (until explicit reset) | Conway death protection only (shouldDieGenetic) |
-| **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
-| **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set to `true` when `avg_gradient_magnitude > threshold`, never cleared | Conway death protection only (shouldDieGenetic) |
+| **significant_charge_change_forward** | Sticky flag: has forward charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_forward > threshold`, never cleared (until explicit reset) | Telemetry / display only |
+| **significant_charge_change_reverse** | Sticky flag: has reverse charge ever exceeded gene 7 | Set to `true` when `max_charge_diff_reverse > threshold`, never cleared | Telemetry / display only |
+| **significant_gradient_change** | Sticky flag: has gradient ever exceeded gene 10 | Set to `true` when `avg_gradient_magnitude > threshold`, never cleared | Telemetry / display only |
 
-**Key design principle:** Rolling metrics (`max_charge_diff_*`, `avg_gradient_magnitude`, `contributionScore`) are *live* — they reflect recent training and are used for pruning. Sticky flags (`significant_*`) are only for Conway-style genetic death protection: once a cell has ever been significantly active, it's protected from overcrowding/isolation rules.
+**Key design principle:** Rolling metrics (`max_charge_diff_*`, `avg_gradient_magnitude`, `contributionScore`) are *live* — they reflect recent training and are used for pruning and Andromeda protection. Sticky flags (`significant_*`) are kept for telemetry and display but are not used for protection decisions. **Contribution protection** (J key) uses `contributionScore` directly — a rolling metric with real memory — instead of these binary flags.
 
 **Pruning uses rolling windows, not single-sample snapshots.** The rolling window for `max_charge_diff_*` and `avg_gradient_magnitude` is sized to the training set (1 epoch worth of samples). A cell must be consistently inactive or non-learning across many images before it can be pruned.
 
@@ -340,7 +340,11 @@ This design has three benefits:
 2. **Immune period still matters** — a cell born at sample 999 of 1000 has only 1 training cycle before winter. Gene 14 (immune period) protects it across epoch boundaries, ensuring a minimum development time. Like a fawn born in November — it needs to survive its first winter on stored reserves before it can be fairly evaluated.
 3. **No stale-gradient kills** — pruning never runs when training is off, so cells can't die based on frozen metrics.
 
-Andromida Game-of-Life dynamics (birth, death by overcrowding/isolation, mutation) still run every frame when `Run=true` — only threshold pruning (P/O/Y/Z) is epoch-gated.
+Andromida Game-of-Life dynamics (birth, death by overcrowding/isolation, mutation) still run every frame when `Run=true` — only threshold pruning (P/O/Y/Z) is epoch-gated. Press **0** to force an immediate pruning pass without waiting for the epoch boundary.
+
+### Contribution Protection (J key)
+
+Toggle with **J**. When on, cells whose `contributionScore` exceeds the `min_contribution_score` threshold (gene 13 / config) are shielded from Andromeda GoL death (overcrowding and isolation). This is the complement to pruning: pruning removes non-contributors at epoch boundaries, while contribution protection preserves contributors every frame during Andromeda dynamics. The threshold is configurable via **E** or **C** keys, and `suggestParams()` recommends the 25th percentile of current contribution scores (keeping the top 75% alive).
 
 ### Pruning Summary Table
 
@@ -577,19 +581,42 @@ After weight updates, `updateGradientImportance()` pushes |gradient| to the roll
 
 ---
 
-## 3D Visualization Color Modes
+## 3D Visualization
 
 Press **G** in 3D view to cycle through five color modes:
 
 | Mode | What It Shows | Color Mapping |
 |------|--------------|---------------|
-| **Charge** | Cell activation level | Dark (low) → Bright (high charge) |
+| **Charge** | Cell activation level — diverging colormap | Red (positive charge) → Dark (zero) → Green (negative charge), sqrt scaled |
 | **Error** | Backprop error signal | Blue (negative) → Dark (zero) → Red (positive) |
 | **Gradient** | Learning signal strength | Dark (low \|gradient\|) → Green (high \|gradient\|) |
 | **Weight Strength** | Average absolute weight | Dark (near-zero weights) → Yellow (strong weights) |
 | **Contribution** | Combined activity × learning score | Dark (low) → Cyan (medium) → White (high contribution) |
 
-Key **4** activates the backprop learning view: switches to 3D, sets color mode to **Error** so you see the full network update in real time as each training sample is processed. Press **G** to cycle to other modes while in this view.
+**Neuron sizing:** Hidden-layer neurons are sized by contribution score (gradient × (1 + charge_diff)). High-contribution cells appear as large dots, near-dead cells as tiny dots. Input and output layers use fixed sizes.
+
+**Input layer:** Rendered as a flat 28×28 image plane (green brightness = |charge|) at the input Z position, visible from any angle. A thin green border keeps it visible even when the image is dark.
+
+**Output layer:** Always rendered as large bright green dots (size 1.2) regardless of color mode, so the answer cells stand out clearly.
+
+Key **4** activates the backprop learning view: switches to 3D, sets color mode to **Error** so you see the full network update in real time as each training sample is processed. The HUD shows the selected cell's charge, error, gradient magnitude, contribution score, and weight count. Press **G** to cycle to other modes while in this view.
+
+---
+
+## 2D Display Modes (G key)
+
+Press **G** (when not in 3D) to cycle through six visualization modes:
+
+| Mode | What It Shows | Color Mapping |
+|------|--------------|---------------|
+| **Proteins** | 3×3 sub-cell grid of protein values (default) | Multi-color per protein type |
+| **Genes** | 3×3 sub-cell grid of gene values | Multi-color per gene type |
+| **Charge** | Instantaneous cell activation (current sample) | Red (positive) → Dark (zero) → Green (negative), sqrt scaled |
+| **Error** | Backprop error signal | Yellow (positive) → Dark (zero) → Cyan (negative), ×10 amplified |
+| **Gradient** | Absolute gradient magnitude | Dark (low) → Bright green (high), ×200 amplified |
+| **Contribution** | Contribution score (gradient × (1 + charge_diff)) | Dark (low) → Bright magenta (high), double-sqrt |
+
+The last four modes render each cell as a single solid-color square (like input/label layers), making spatial patterns immediately visible across the whole layer.
 
 ---
 
@@ -666,6 +693,8 @@ Press **E** (2D view only). A series of modal dialogs appears **in this order**.
 | 11 | `charge_delta (current: …) [net suggests: …]:` | Activity threshold for pruning / “significant” charge change (gene 7 / config). |
 | 12 | `gradient_threshold (current: …) [net suggests: …]:` | Survival threshold for gradient-based pruning (gene 10 / config). |
 | 13 | `activation_slope (current: …) [net suggests: …]:` | **Leaky ReLU negative slope** (gene 11) — explained below. |
+| 14 | `immune_period (10-100):` | Training cycles before a newborn cell can be pruned (gene 14). |
+| 15 | `min_contribution_score (current: …) [net suggests: …]:` | Threshold for contribution-score pruning (Z key) and contribution protection (J key). Suggestion = 25th percentile of current scores. |
 
 After the last prompt, hidden cells may **remap weights** if dendrite size changed, and **avg_weights_cell** may be auto-set from measured fan-in.
 
@@ -714,6 +743,8 @@ With **U** (autonomous) on, each cell can carry its **own** gene 11 value; with 
 | **O** | Toggle gradient pruning (low avg gradient — gene 10) |
 | **Y** | Toggle weight-magnitude pruning (max \|weight\| too small — gene 12) |
 | **Z** | Toggle contribution-score pruning (gradient × (1 + charge_diff) too low — gene 13) |
+| **J** | Toggle contribution protection — cells with contributionScore above `min_contribution_score` are shielded from Andromeda GoL death |
+| **0** | Force prune NOW — immediately runs the same pruning pass that normally happens at epoch boundaries, using whichever strategies (P/O/Y/Z) are on |
 | **=** | Toggle prune logic between AND / OR (for charge-based pruning) |
 | **C** | Change pruning parameters: charge delta, gradient threshold, contribution score, percentile |
 | **U** | Toggle autonomous cell genes (per-cell evolved vs global config for genes 3–13) |
@@ -733,11 +764,11 @@ With **U** (autonomous) on, each cell can carry its **own** gene 11 value; with 
 
 | Key | Action |
 |-----|--------|
-| **G** | 2D: switch genes / proteins display. 3D: cycle color mode (Charge → Error → Gradient → Weight → Contribution) |
+| **G** | 2D: cycle 6 display modes (Proteins → Genes → Charge → Error → Gradient → Contribution). 3D: cycle color mode (Charge → Error → Gradient → Weight → Contribution) |
 | **V** | Cycle statistics views (Settings + Pruning / Averages / Cell Types) |
 | **D** | Toggle display updating (training + plots keep running; only cell rendering is paused) |
-| **3** | Toggle 3D Three.js view |
-| **4** | Toggle 3D backprop visualization (full network, Error color mode) |
+| **3** | Toggle 3D Three.js view (neuron size = contribution score; input = flat image plane; output = bright green dots) |
+| **4** | Toggle 3D backprop visualization (full network, Error color mode, selected cell metrics in HUD) |
 | **Q** | Dump per-layer telemetry report to stats pane |
 | **H** | Jump to next **##** heading in the README help panel (2D only) |
 | **?** | Scroll help panel to top |
