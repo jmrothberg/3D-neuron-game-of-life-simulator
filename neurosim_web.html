@@ -119,8 +119,7 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
   'use strict';
 
   const COLORS = [[13,0,184],[255,165,0],[255,192,203],[255,255,0],[0,255,0],[255,0,0],[179,0,255],[0,0,255]];
-  const WINDOW_WIDTH = 1008, WINDOW_HEIGHT = 1008, WINDOW_EXTENSION = 100;
-  const HELP_PANEL_WIDTH = 500, MAIN_SURFACE_WIDTH = 1508 - HELP_PANEL_WIDTH;
+  const WINDOW_WIDTH = 1008, WINDOW_HEIGHT = 1008;
   const CELL_SIZE = 9;
   const WIDTH = (WINDOW_WIDTH / CELL_SIZE / 4) | 0;
   const HEIGHT = (WINDOW_HEIGHT / CELL_SIZE / 4) | 0;
@@ -148,7 +147,9 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
     for (let x = 0; x < GRID_W; x++) {
       const row0 = [], rowL = [];
       for (let y = 0; y < GRID_W; y++) {
-        row0.push(_compactCell(0, x, y, charges[x * GRID_W + y]));
+        /* charges is row-major (row*28+col). Canvas x=horizontal=col, y=vertical=row,
+           so cells[x][y] needs pixel at (row=y, col=x) → charges[y * GRID_W + x]. */
+        row0.push(_compactCell(0, x, y, charges[y * GRID_W + x]));
         rowL.push(null);
       }
       layer0.push(row0); layerL.push(rowL);
@@ -370,7 +371,7 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
       cells: makeCellsGrid(),
       running: false, prune: false, gradient_prune: false, weight_mag_prune: false, contrib_score_prune: false, training_mode: false,
       andromida_mode: false, charge_change_protection: true, back_prop: false,
-      training_data_loaded: false, display_updating: true, simulating: true, not_saved_yet: true,
+      training_data_loaded: false, display_updating: true, not_saved_yet: true,
       prune_logic: 'OR', display: 'proteins', direction_of_charge_flow: '+++++>>>>>',
       show_3d_view: false, show_backprop_view: false, show_training_stats: false, display_set: 0, _3d_color_mode: 0,
       bingo_count: 0, max_bingo_count: 0, total_cells: 0, total_loss: 0, total_predictions: 0,
@@ -383,9 +384,9 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
       training_data_layer_0: [], training_data_num_layer_minus_1: [],
       /* M=MNIST F=Fashion S=synthetic U=unknown file X=no training data loaded — used in save filenames */
       training_dataset_code: 'X',
-      rotation_x: 0, rotation_y: 0, rotation_angle: 0, zoom: -15,
+      rotation_x: 0, rotation_y: 0, zoom: -15,
       mouse_up: true, current_index: 0, side_panel_text: [], training_stats_buffer: {},
-      stats_update_frequency: 1, timing: false,
+      stats_update_frequency: 1,
       /* Per-frame index when training with display on (one sample per animation frame so the grid can repaint). */
       _training_sample_i: null,
       _shuffle_order: null,
@@ -497,55 +498,87 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
       this.bias = uniform(-this.genes[5], this.genes[5]);
     }
     colorGenes() {
-      const g4 = [];
-      for (let i = 0; i < 4; i++) {
-        const g = this.genes[i], col = COLORS[i];
-        g4.push([
-          clip(((col[0] * g / 15) | 0), 0, 255),
-          clip(((col[1] * g / 15) | 0), 0, 255),
-          clip(((col[2] * g / 15) | 0), 0, 255),
-        ]);
+      /* 3×3 layout — the 9 most informative genes:
+         Row 0: [0] OT overcrowd  [1] IT isolation  [2] BT birth      ← breeding / GoL rules
+         Row 1: [3] WG dendrite    [4] LR learn rate  [5] AS act slope  ← architecture + learning
+         Row 2: [6] WPT wt prune   [7] MCS contrib    [8] IP immune     ← pruning + immunity
+         Floor brightness = 45 so every nonzero gene is visible. */
+      const c = new Array(9);
+      const F = 45;
+      /* Row 0: breeding genes 0-2, integer 2-15, each with its own COLORS hue */
+      for (let i = 0; i < 3; i++) {
+        const frac = clip((this.genes[i] - 2) / 13, 0, 1);
+        const b = F + ((255 - F) * frac) | 0;
+        const col = COLORS[i];
+        c[i] = [(col[0] * b / 255) | 0, (col[1] * b / 255) | 0, (col[2] * b / 255) | 0];
       }
-      const s4 = clip((((this.genes[4] - 9) / 72) * 255) | 0, 0, 255);
-      const s5 = clip((this.genes[5] * 255) | 0, 0, 255);
-      const s6 = clip((((this.genes[6] - 5) / 25) * 255) | 0, 0, 255);
-      const g7v = clip(this.genes[7], 1e-6, 1e-2);
-      const s7 = clip((((log10(g7v) + 6) / 4) * 255) | 0, 0, 255);
-      const g8v = clip(this.genes[8], 1e-6, 1e-4);
-      const s8 = clip((((log10(g8v) + 6) / 2) * 255) | 0, 0, 255);
-      const colors = g4.concat([[s4, 0, s4], [0, s5, s5], [s6, 0, 0], [0, s7, 0], [0, 0, s8]]);
-      const s9 = clip((((this.genes[9] - 0.003) / 0.047) * 255) | 0, 0, 255);
-      const g10v = clip(this.genes[10], 1e-8, 1e-4);
-      const s10 = clip((((log10(g10v) + 8) / 4) * 255) | 0, 0, 255);
-      const s11 = clip((((this.genes[11] - 0.01) / 0.29) * 255) | 0, 0, 255);
-      /* gene 12: weight prune threshold (log scale ~1e-3..~0.032) */
-      const g12v = clip(this.genes[12], 1e-3, 0.032);
-      const s12 = clip((((log10(g12v) + 3) / 1.5) * 255) | 0, 0, 255);
-      /* gene 13: min contribution score (log scale ~1e-6..1e-2) */
-      const g13v = clip(this.genes[13], 1e-6, 1e-2);
-      const s13 = clip((((log10(g13v) + 6) / 4) * 255) | 0, 0, 255);
-      /* gene 14: immune period (integer 10..100) */
-      const s14 = clip((((this.genes[14] - 10) / 90) * 255) | 0, 0, 255);
-      colors.push([0, s9, s9], [s10, 0, s10], [s11, s11, 0], [s12, s12, 0], [0, s13, s13], [s14, 0, s14]);
-      this.colors = colors;
+      /* [3] Gene 4 dendrite size: 9/25/49 → 3 distinct brightness levels; magenta */
+      const wgF = this.genes[4] >= 49 ? 1 : this.genes[4] >= 25 ? 0.6 : 0.25;
+      const wgV = F + ((255 - F) * wgF) | 0;
+      c[3] = [wgV, 0, wgV];
+      /* [4] Gene 9 learning rate: 0.003–0.05 → green-cyan */
+      const lrF = clip((this.genes[9] - 0.003) / 0.047, 0, 1);
+      const lrV = F + ((255 - F) * lrF) | 0;
+      c[4] = [0, lrV, lrV >> 2];
+      /* [5] Gene 11 activation slope: 0.01–0.3 → yellow */
+      const asF = clip((this.genes[11] - 0.01) / 0.29, 0, 1);
+      const asV = F + ((255 - F) * asF) | 0;
+      c[5] = [asV, asV, 0];
+      /* [6] Gene 12 weight prune threshold: log 1e-3..0.032 → cyan */
+      const wptF = clip((log10(clip(this.genes[12], 1e-3, 0.032)) + 3) / 1.5, 0, 1);
+      const wptV = F + ((255 - F) * wptF) | 0;
+      c[6] = [0, wptV, wptV];
+      /* [7] Gene 13 min contribution score: log 1e-6..1e-2 → red-magenta */
+      const mcsF = clip((log10(clip(this.genes[13], 1e-6, 1e-2)) + 6) / 4, 0, 1);
+      const mcsV = F + ((255 - F) * mcsF) | 0;
+      c[7] = [mcsV, 0, mcsV >> 1];
+      /* [8] Gene 14 immune period: 10–100 → orange */
+      const ipF = clip((this.genes[14] - 10) / 90, 0, 1);
+      const ipV = F + ((255 - F) * ipF) | 0;
+      c[8] = [ipV, (ipV * 0.6) | 0, 0];
+      this.colors = c;
     }
     colorProteins() {
-      this.protein_colors = new Array(12).fill(0);
-      const br = this.genes[5];
-      this.protein_colors[0] = [clip((Math.abs(this.bias) / (br + EPS) * 255) | 0, 0, 255), 0, clip((Math.abs(this.bias) / (br + EPS) * 255) | 0, 0, 255)];
-      this.protein_colors[1] = [clip((this.max_charge_diff_forward * 255) | 0, 0, 255), 0, 0];
-      this.protein_colors[2] = [0, 0, clip((this.max_charge_diff_reverse * 255) | 0, 0, 255)];
-      this.protein_colors[4] = [clip((this.charge * 255) | 0, 0, 255), 0, 0];
-      const em = Math.abs(this.error) + EPS;
-      this.protein_colors[6] = [0, 0, clip((255 * (log10(em) + 3) / 2) | 0, 0, 255)];
-      let mw = 0; for (let i = 0; i < this.weights.length; i++) mw += Math.abs(this.weights[i]);
-      mw /= Math.max(1, this.weights.length);
-      this.protein_colors[7] = [0, clip((mw * 255) | 0, 0, 255), 0];
-      const gr = this.charge * this.error;
-      this.protein_colors[8] = [0, 0, clip(Math.log(Math.abs(gr + EPS) * 55) | 0, 0, 255)];
-      this.protein_colors[3] = this.protein_colors[5] = [0, 0, 0];
-      this.protein_colors[9] = this.protein_colors[10] = this.protein_colors[11] = [0, 0, 0];
-      this.protein_colors[12] = this.protein_colors[13] = [0, 0, 0];
+      /* 3×3 layout — breeding identity + fastest-changing protein signals:
+         Row 0: [0] OT overcrowd  [1] IT isolation  [2] BT birth   ← standard breeding genes (identity)
+         Row 1: [3] Charge ±      [4] Max Δcharge   [5] Error ±    ← fastest per-sample signals
+         Row 2: [6] |Gradient|    [7] ContribScore   [8] AvgGradMag ← per-sample learning + rolling pruning
+         Charge: RED positive, GREEN negative (user spec). Floor=40 for visibility. */
+      const c = new Array(9);
+      const F = 40;
+      /* Row 0: breeding genes 0-2 (same rendering as colorGenes — always visible identity) */
+      for (let i = 0; i < 3; i++) {
+        const frac = clip((this.genes[i] - 2) / 13, 0, 1);
+        const b = F + ((255 - F) * frac) | 0;
+        const col = COLORS[i];
+        c[i] = [(col[0] * b / 255) | 0, (col[1] * b / 255) | 0, (col[2] * b / 255) | 0];
+      }
+      /* [3] Charge: RED positive, GREEN negative; sqrt compressed, clip ±2 */
+      const chV = Math.sqrt(Math.min(Math.abs(this.charge) / 2, 1));
+      const chB = chV > 0.005 ? (F + (255 - F) * chV) | 0 : 0;
+      c[3] = this.charge >= 0 ? [chB, 0, 0] : [0, chB, 0];
+      /* [4] Max charge diff (max of fwd/rev): changes each forward pass; orange */
+      const mcd = Math.max(this.max_charge_diff_forward, this.max_charge_diff_reverse);
+      const mcdV = Math.sqrt(Math.min(mcd, 1));
+      const mcdB = mcdV > 0.005 ? (F + (255 - F) * mcdV) | 0 : 0;
+      c[4] = [mcdB, (mcdB * 0.5) | 0, 0];
+      /* [5] Error: changes each backward pass; amplified ×10; cyan(neg) / yellow(pos) */
+      const errV = Math.sqrt(Math.min(Math.abs(this.error) * 10, 1));
+      const errB = errV > 0.005 ? (F + (255 - F) * errV) | 0 : 0;
+      c[5] = this.error >= 0 ? [errB, errB, 0] : [0, (errB * 0.7) | 0, errB];
+      /* [6] |Gradient|: changes each backward pass; amplified ×200; bright green */
+      const gV = Math.sqrt(Math.min(Math.abs(this.gradient) * 200, 1));
+      const gB = gV > 0.005 ? (F + (255 - F) * gV) | 0 : 0;
+      c[6] = [0, gB, (gB * 0.3) | 0];
+      /* [7] Contribution score: recomputed each backward; double-sqrt for wide range; white-cyan */
+      const csV = this.contributionScore > 1e-10 ? Math.min(Math.sqrt(Math.sqrt(this.contributionScore) * 20), 1) : 0;
+      const csB = csV > 0.005 ? (F + (255 - F) * csV) | 0 : 0;
+      c[7] = [csB, csB, (csB * 0.6) | 0];
+      /* [8] Rolling avg gradient magnitude: pruning metric, updates each cycle; green-cyan */
+      const agV = Math.sqrt(Math.min(this.avg_gradient_magnitude / 0.05, 1));
+      const agB = agV > 0.005 ? (F + (255 - F) * agV) | 0 : 0;
+      c[8] = [(agB * 0.2) | 0, agB, (agB * 0.6) | 0];
+      this.protein_colors = c;
     }
 
     computeTotalCharge(upper, reach) {
@@ -830,19 +863,13 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
       const reach = (cfg && cfg.autonomous_network_genes) ? this.reach : cfg.length_of_dendrite;
       const wd = (cfg && cfg.autonomous_network_genes) ? this.genes[8] : cfg.weight_decay;
       if (this.layer === cfg.num_layers - 2) {
-        /* Last hidden layer: sum error from ALL output cells within reach,
-           not just the one at the same (x,y). Fixes pruning bug where cells
-           at positions without an output cell got error=EPS (zero gradient). */
-        let es = EPS;
-        const outZ = cfg.num_layers - 1;
-        for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
-          const nx = this.x + dx, ny = this.y + dy;
-          if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
-            const t = cellsArr[nx][ny][outZ];
-            if (t) es += (this.charge - t.charge) * this.reluDerivative(this.charge);
-          }
-        }
-        this.error = clip(es, -10, 10);
+        /* Output layer error: compare directly against the label cell at the
+           same (x,y) position in the desired layer.  Only the 10 answer cells
+           (x=9..18, y=14) have a label cell there; all other layer N-2 cells
+           get error=EPS and will be correctly pruned as dead weight. */
+        const t = cellsArr[this.x][this.y][cfg.num_layers - 1];
+        if (t) this.error = clip((this.charge - t.charge) * this.reluDerivative(this.charge), -10, 10);
+        else this.error = EPS;
       } else {
         const below = this.getLayerBelowCells(cellsArr, reach, maxBelow);
         this.computeErrorSignal(null, below, reach);
@@ -1085,17 +1112,6 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
     }
   }
 
-  function training(state, config, drawFn, renderBackpropFn, minibatchPlotCtx) {
-    state.bingo_count = 0;
-    state._batch_loss_sum = 0;
-    state._batch_sample_count = 0;
-    const setSize = config.how_much_training_data;
-    for (let i = 0; i < setSize; i++) {
-      trainOnSample(state, config, i, renderBackpropFn, minibatchPlotCtx);
-      if (state.display_updating && drawFn) drawFn();
-    }
-  }
-
   function applyLayerFromGrid(cells, layer, grid) {
     for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
       const g = grid[x][y];
@@ -1315,22 +1331,32 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
   }
   function drawCells(state, config, ctx) {
     const disp = state.display;
-    for (let z = 0; z < config.num_layers; z++)
+    const cs = CELL_SIZE / 3;
+    const nl = config.num_layers;
+    const qw = WINDOW_WIDTH / 4, qh = WINDOW_HEIGHT / 4;
+    for (let z = 0; z < nl; z++) {
+      const ox = (z % 4) * qw, oy = ((z / 4) | 0) * qh;
+      const isData = (z === 0 || z === nl - 1);
       for (let x = 0; x < WIDTH; x++) for (let y = 0; y < HEIGHT; y++) {
         const cell = state.cells[x][y][z]; if (!cell) continue;
+        const bx = x * CELL_SIZE + ox, by = y * CELL_SIZE + oy;
+        if (isData) {
+          /* Input & label layers: solid green square, brightness = |charge|, no scaling down */
+          const v = Math.min(Math.abs(cell.charge) * 255, 255) | 0;
+          if (v > 0) { ctx.fillStyle = `rgb(0,${v},0)`; ctx.fillRect(bx, by, CELL_SIZE, CELL_SIZE); }
+          continue;
+        }
         if (disp === 'genes') cell.colorGenes(); else cell.colorProteins();
-        const px = (i) => x * CELL_SIZE + (i % 3) * (CELL_SIZE / 3) + (z % 4) * (WINDOW_WIDTH / 4);
-        const py = (i) => y * CELL_SIZE + ((i / 3) | 0) % 3 * (CELL_SIZE / 3) + ((z / 4) | 0) * (WINDOW_HEIGHT / 4);
         const pal = disp === 'genes' ? cell.colors : cell.protein_colors;
-        const cs = CELL_SIZE / 3;
         for (let i = 0; i < 9; i++) {
           const col = pal[i];
           if (!col || col === 0) continue;
           const [r, g, b] = col;
           ctx.fillStyle = `rgb(${r},${g},${b})`;
-          ctx.fillRect(px(i), py(i), cs, cs);
+          ctx.fillRect(bx + (i % 3) * cs, by + ((i / 3) | 0) * cs, cs, cs);
         }
       }
+    }
   }
 
   function updateCellTypes(cells, config) {
@@ -1869,6 +1895,8 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
   }
 
   // --- Three.js 3D cache ---
+  let _hud3dEl = null;
+  function getHud3d() { return _hud3dEl || (_hud3dEl = document.getElementById('hud3d')); }
   let g3 = {
     scene: null, camera: null, renderer: null,
     root: null,
@@ -1902,40 +1930,43 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
   const _3D_COLOR_MODE_NAMES = ['Charge', 'Error', 'Gradient', 'Weight Strength', 'Contribution'];
   const _3D_COLOR_MODE_COUNT = _3D_COLOR_MODE_NAMES.length;
 
-  /* Mode 1: Error — blue (negative) → dark (zero) → red (positive) */
+  /* Mode 1: Error — blue (negative) → dark (zero) → red (positive).
+     sqrt(|e|*10) amplifies small errors (typical 1e-4..0.1) into visible range. */
   function errorColor(cell) {
     if (!cell) return [0.1, 0.1, 0.1];
-    const e = clip(cell.error, -2, 2);
-    const mag = Math.abs(e) / 2;
-    if (e > 0) return [0.3 + 0.7 * mag, 0.1 * (1 - mag), 0.1 * (1 - mag)];
-    return [0.1 * (1 - mag), 0.1 * (1 - mag), 0.3 + 0.7 * mag];
+    const e = cell.error;
+    const m = Math.min(Math.sqrt(Math.abs(e) * 10), 1);
+    if (e > 0) return [0.15 + 0.85 * m, 0.1 * (1 - m), 0.1 * (1 - m)];
+    return [0.1 * (1 - m), 0.1 * (1 - m), 0.15 + 0.85 * m];
   }
 
-  /* Mode 2: Gradient flow — black (dead) → yellow (active learning) */
+  /* Mode 2: Gradient flow — dark (dead) → bright yellow (active learning).
+     sqrt(|g|*200) amplifies small gradients (typical 1e-5..0.01) into visible range. */
   function gradientColor(cell) {
     if (!cell) return [0.05, 0.05, 0.05];
-    const g = Math.min(Math.abs(cell.gradient), 1);
-    const v = Math.sqrt(g);
-    return [v, v * 0.9, v * 0.1];
+    const v = Math.min(Math.sqrt(Math.abs(cell.gradient) * 200), 1);
+    return [0.08 + 0.92 * v, 0.08 + 0.82 * v, 0.08 * (1 - v)];
   }
 
-  /* Mode 3: Weight strength — black (weak) → cyan (strong connections) */
+  /* Mode 3: Weight strength — dark (weak) → cyan (strong connections).
+     sqrt(avg*6) spreads the typical 0.05-0.3 weight range visibly. */
   function weightStrengthColor(cell) {
     if (!cell || !cell.weights || !cell.weights.length) return [0.08, 0.08, 0.08];
     let sum = 0;
     for (let i = 0; i < cell.weights.length; i++) sum += Math.abs(cell.weights[i]);
     const avg = sum / cell.weights.length;
-    const v = Math.min(avg * 4, 1);
-    return [v * 0.15, v * 0.7 + 0.1, v * 0.9 + 0.1];
+    const v = Math.min(Math.sqrt(avg * 6), 1);
+    return [v * 0.15, 0.1 + v * 0.7, 0.1 + v * 0.9];
   }
 
-  /* Mode 4: Contribution score — black (dead) → magenta (high contribution).
+  /* Mode 4: Contribution score — dark (dead) → magenta (high contribution).
+     Double-sqrt + ×20 maps the wide 1e-8..0.1 range into visible brightness.
      Shows which cells are both active AND learning — the best pruning predictor. */
   function contributionColor(cell) {
     if (!cell) return [0.05, 0.05, 0.05];
     const s = cell.contributionScore;
-    const v = Math.min(Math.sqrt(s * 1000), 1);
-    return [0.3 + 0.7 * v, 0.1 * (1 - v), 0.3 + 0.5 * v];
+    const v = s > 1e-10 ? Math.min(Math.sqrt(Math.sqrt(s) * 20), 1) : 0;
+    return [0.1 + 0.9 * v, 0.1 * (1 - v * 0.5), 0.15 + 0.7 * v];
   }
 
   /* Build a small round-disc texture so points render as circles, not squares */
@@ -2148,7 +2179,7 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
     apply3dCamera(state);
     dispose3dBackpropChildren();
     g3.renderer.render(g3.scene, g3.camera);
-    const hud = document.getElementById('hud3d');
+    const hud = getHud3d();
     hud.style.display = 'block';
     hud.textContent = [
       `Layers: ${config.num_layers} | Cells: ${g3.nIn + g3.nHid + g3.nOut} | Color: ${_3D_COLOR_MODE_NAMES[state._3d_color_mode]} (G=cycle)`,
@@ -2185,7 +2216,9 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
       g3.backpropGroup.add(new THREE.LineSegments(g, m));
     };
     const pHi = [], cHi = [];
-    pHi.push(px, py, z); cHi.push(1, 1, 0);
+    /* Current cell: brightness by error magnitude (yellow→white); dim yellow when error≈0 */
+    const eMag = Math.min(Math.sqrt(Math.abs(cell.error) * 10), 1);
+    pHi.push(px, py, z); cHi.push(0.4 + 0.6 * eMag, 0.4 + 0.6 * eMag, eMag * 0.3);
     const reach = config.autonomous_network_genes ? cell.reach : config.length_of_dendrite;
     const wm = config.autonomous_network_genes ? (Math.sqrt(cell.genes[4]) | 0) : config.weight_matrix;
     const lineSegs = [], lineCols = [];
@@ -2195,18 +2228,24 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
         const nx = cx + dx, ny = cy + dy;
         if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) continue;
         const u = state.cells[nx][ny][cz - 1]; if (!u) continue;
-        const ci = Math.min(Math.abs(u.charge), 1);
         const npx = nx - halfW, npy = ny - halfH;
-        pHi.push(npx, npy, prevZz);
-        cHi.push(0.2, 0.5 + 0.5 * ci, 1);
-        /* Draw dendrite line from current cell to this predecessor, colored by weight sign */
+        /* Upstream dot: color by charge×weight contribution to this cell (green=excitatory, red=inhibitory) */
         const wi = (dx + reach) * wm + (dy + reach);
-        if (wi < cell.weights.length) {
+        let contrib = 0;
+        if (wi >= 0 && wi < cell.weights.length) contrib = u.charge * cell.weights[wi];
+        const cAmp = Math.min(Math.sqrt(Math.abs(contrib) * 8), 1);
+        pHi.push(npx, npy, prevZz);
+        if (contrib >= 0) cHi.push(0.15, 0.3 + 0.7 * cAmp, 0.15 + 0.5 * cAmp);
+        else              cHi.push(0.3 + 0.7 * cAmp, 0.15, 0.15 + 0.3 * cAmp);
+        /* Connection line: intensity by |weight|, saturation boosted by gradient magnitude */
+        if (wi >= 0 && wi < cell.weights.length) {
           const w = cell.weights[wi];
-          const inten = Math.max(0.3, Math.min(Math.abs(w), 1));
+          const wInt = Math.max(0.25, Math.min(Math.abs(w), 1));
+          const gInt = Math.min(Math.sqrt(Math.abs(cell.gradient) * 200), 1);
+          const bright = 0.3 * wInt + 0.7 * wInt * (0.3 + 0.7 * gInt);
           lineSegs.push(px, py, z, npx, npy, prevZz);
-          if (w > 0) lineCols.push(0, inten, 0.4, 0, inten, 0.4);
-          else lineCols.push(inten, 0, 0.4, inten, 0, 0.4);
+          if (w > 0) lineCols.push(0, bright, bright * 0.3, 0, bright, bright * 0.3);
+          else       lineCols.push(bright, 0, bright * 0.3, bright, 0, bright * 0.3);
         }
       }
     }
@@ -2471,7 +2510,7 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
       } else {
         cv3d.style.display = 'none';
         cv2d.style.display = 'block';
-        document.getElementById('hud3d').style.display = 'none';
+        getHud3d().style.display = 'none';
       }
     }
 
@@ -2897,7 +2936,6 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
     }
     window.addEventListener('keydown', (e) => { onKeyDown(e); });
 
-    let startT = performance.now();
     function tick() {
       requestAnimationFrame(tick);
       /* neurosim/main.py: autosave when a full training batch is ever classified perfectly */
@@ -2933,7 +2971,6 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
           }
           const i = state._training_sample_i;
           trainOnSample(state, config, i, null, pred);
-          if (state.display_updating && !state.show_3d_view) doDraw2d();
           state._training_sample_i++;
           if (state._training_sample_i >= setSize) {
             const ba = state._batch_loss_sum / Math.max(1, state._batch_sample_count);
@@ -2967,9 +3004,6 @@ const README_HTML = "<h1 id=\"jmr-genetic-game-of-neural-network-life\">JMR Gene
           doDraw2d();
         }
       }
-      const now = performance.now();
-      const elapsed = (now - startT) / 1000;
-      startT = now;
       const col = state.running ? '#0f0' : '#fff';
       /* Per-epoch and per-minibatch loss for status bar */
       const lastEpochLoss = state.epochLossPoints.length ? state.epochLossPoints[state.epochLossPoints.length - 1].toFixed(2) : '--';
